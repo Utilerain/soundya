@@ -1,0 +1,7 @@
+# The speaker's busybox ash cannot read CRLF scripts: keep shell files LF everywhere.
+*.sh text eol=lf
+*.env text eol=lf
+S99soundya text eol=lf
+install-windows.cmd text eol=crlf
+pc/*.cmd text eol=crlf
+pc/*.ps1 text eol=crlf

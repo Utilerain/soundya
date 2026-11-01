@@ -201,11 +201,28 @@ fn has(bits: &[u8], code: u16) -> bool {
 
 /// The input device with the volume buttons.
 fn device() -> Option<PathBuf> {
-    (0..10).map(|n| PathBuf::from(format!("/dev/input/event{n}"))).find(|path| {
-        let Ok(f) = std::fs::File::open(path) else { return false };
+    let by_caps = (0..10).find_map(|n| {
+        let path = PathBuf::from(format!("/dev/input/event{n}"));
+        let Ok(f) = std::fs::File::open(&path) else { return None };
         let mut bits = [0u8; 96];
         let got = unsafe { ioctl(f.as_raw_fd(), eviocgbit_key(bits.len() as u32), bits.as_mut_ptr()) };
-        got > 0 && has(&bits, KEY_VOLUMEUP) && has(&bits, KEY_VOLUMEDOWN)
+        (got > 0 && has(&bits, KEY_VOLUMEUP) && has(&bits, KEY_VOLUMEDOWN)).then_some(path)
+    });
+    by_caps.or_else(|| {
+        // Lite 2: the touch controller (aw9610x) takes the injected presses even
+        // though its advertised capabilities do not name the volume keys.
+        let dir = std::fs::read_dir("/sys/class/input").ok()?;
+        for entry in dir.flatten() {
+            let name = crate::fsx::read_string(&entry.path().join("name")).unwrap_or_default();
+            if name.trim() != "aw9610x" {
+                continue;
+            }
+            let events = std::fs::read_dir(entry.path().join("event")).ok()?; // /sys/class/input/input2/event2
+            if let Some(event) = events.flatten().next() {
+                return Some(PathBuf::from("/dev/input").join(event.file_name()));
+            }
+        }
+        None
     })
 }
 

@@ -1,7 +1,7 @@
 //! The ring while music plays (SoundCloud or AirPlay): a steady colour, a
 //! pulse with the beat, or an equaliser across the ring's zones («Подсветка»);
 //! dim on pause, breathing while something loads.
-//! (Station Lite: three RGB zones in sysfs, Mini 2: six).
+//! (Station Lite and Lite 2: three RGB zones in sysfs, Mini 2: six).
 //!
 //! Alice's own animations (listening, speaking, volume) write the same LEDs, so
 //! the ring is only set while Alice is idle and put back after her animations.
@@ -162,8 +162,8 @@ impl Ring {
         if crate::luna::active() {
             return Some(Ring::Luna);
         }
-        // Station Lite: micro:red:ring1..3; Mini 2: mini2:red:ring1..6.
-        let sysfs = ["micro", "mini2"].into_iter().find_map(|board| {
+        // Station Lite: micro:red:ring1..3; Lite 2: plum:…:ring1..3; Mini 2: mini2:…:ring1..6.
+        let sysfs = ["micro", "plum", "mini2"].into_iter().find_map(|board| {
             let zones: Vec<Zone> = (1..=6)
                 .map(|z| {
                     let p = |c: &str| PathBuf::from(format!("/sys/class/leds/{board}:{c}:ring{z}/brightness"));

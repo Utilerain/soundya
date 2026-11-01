@@ -17,7 +17,8 @@ use std::{
 
 use serde_json::Value;
 
-const RELEASES: &str = "https://api.github.com/repos/rodyatotu/soundya/releases/latest";
+// The fork's own releases: an upstream release would not carry the Lite 2 port.
+const RELEASES: &str = "https://api.github.com/repos/Utilerain/soundya/releases/latest";
 const ASSET: &str = "soundya-armv7.tar";
 const TAR: &str = "/tmp/soundya-update.tar";
 const DIR: &str = "/tmp/soundya-update";
