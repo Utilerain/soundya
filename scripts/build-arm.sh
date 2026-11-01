@@ -40,6 +40,9 @@ BIN="target/$TARGET/release/soundya"
 mkdir -p dist/soundya
 cp "$BIN" dist/soundya/soundya
 cp packaging/install.sh packaging/uninstall.sh packaging/run.sh packaging/guard.sh packaging/S99soundya packaging/soundya.env dist/soundya/
+# A Windows checkout has CRLF scripts; the speaker's busybox ash cannot read them.
+sed -i 's/\r$//' dist/soundya/install.sh dist/soundya/uninstall.sh dist/soundya/run.sh dist/soundya/guard.sh dist/soundya/S99soundya dist/soundya/soundya.env 2>/dev/null || \
+    sed -i '' 's/\r$//' dist/soundya/install.sh dist/soundya/uninstall.sh dist/soundya/run.sh dist/soundya/guard.sh dist/soundya/S99soundya dist/soundya/soundya.env
 # AirPlay receiver (prebuilt; rebuild with scripts/build-shairport.sh).
 cp packaging/shairport-sync dist/soundya/
 # zapret nfqws v72.9, linux-arm static, from the official release (see packaging/NFQWS.md).

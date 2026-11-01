@@ -218,13 +218,17 @@ adb shell sh /data/opt/yandex-noupdate.sh status
 
 **Готовая сборка:** скачайте `soundya-armv7.tar` со страницы [Releases](../../releases).
 
-**Или соберите сами** (macOS или Linux):
+**Или соберите сами** (macOS, Linux или WSL):
 ```sh
 curl https://sh.rustup.rs -sSf | sh -s -- -y && source ~/.cargo/env
 rustup target add armv7-unknown-linux-gnueabihf
 brew install zig cargo-zigbuild          # на Linux: pip install ziglang && cargo install cargo-zigbuild
 git clone https://github.com/rodyatotu/soundya && cd soundya
 sh scripts/build-mac.sh                  # → dist/soundya-armv7.tar
+```
+На Linux/WSL можно без zig — тулчейн Linaro скачается сам:
+```sh
+sh scripts/build-arm.sh                  # → dist/soundya-armv7.tar
 ```
 
 ### 4. Установите на колонку
