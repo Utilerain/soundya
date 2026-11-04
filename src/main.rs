@@ -11,6 +11,7 @@ mod clock;
 mod dns;
 mod fsx;
 mod history;
+mod ipt;
 mod led;
 mod luna;
 mod mdns;
@@ -62,6 +63,8 @@ pub enum Cmd {
     Bypass(String),
     /// zapret arguments pasted from a .bat on the page.
     ZapretArgs(String),
+    /// A strategy switched on by hand, without a check.
+    BypassManual(String),
     Control(String, Sender<String>),
     Ended(u64, Outcome),
     Settings(Settings, Sender<String>),
@@ -189,6 +192,10 @@ struct Controller {
     loading: Mutex<Option<String>>,
     /// «Недавно играло» on the page.
     history: history::History,
+    /// Connection checks failed in a row while a bypass was on, and when the
+    /// bypass was last re-picked by itself.
+    net_fails: u32,
+    repicked: Option<std::time::Instant>,
     /// What the running fetch was asked for, as the page shows it, and the
     /// command that asks for it again: goes to the history once it plays.
     asked: Option<(String, String)>,
@@ -341,6 +348,7 @@ impl Controller {
             "tv_host": self.settings.tv_host,
             "bypass": self.settings.bypass,
             "bypass_on": self.settings.bypass_on,
+            "bypass_manual": self.settings.bypass_manual,
             "bypass_name": bypass::name_of(&self.settings.bypass),
             "zapret_args": self.settings.zapret_args,
             "proxy_on": self.settings.proxy_on,
@@ -379,7 +387,7 @@ impl Controller {
             "bypass_log": *self.shared.bypass_log.lock().unwrap(),
             "bypass_busy": self.shared.bypass_busy.load(Ordering::Acquire),
             "volume": volume::level(),
-            "zapret_presets": zapret::PRESETS.iter().enumerate().map(|(i, (name, _))| [zapret::id_of(i), (*name).to_owned()]).collect::<Vec<_>>(),
+            "zapret_presets": zapret::PRESETS.iter().enumerate().map(|(i, (name, _))| { let id = zapret::id_of(i); let e = zapret::engine(&id, "").to_string(); [id, (*name).to_owned(), e] }).collect::<Vec<_>>(),
         })
         .to_string()
     }
@@ -490,6 +498,28 @@ impl Controller {
         });
     }
 
+    /// Switches the bypass to `id` ("" = off). `manual`: chosen by hand, so
+    /// soundya does not replace it by itself; a check hands it back.
+    fn switch_bypass(&mut self, id: String, manual: bool) {
+        self.settings.bypass_manual = manual && !id.is_empty();
+        self.settings.bypass_on = !id.is_empty();
+        self.settings.bypass = id;
+        bypass::set(bypass_strategy(self.settings.active_bypass()));
+        if !zapret::is_zapret(self.settings.active_bypass()) {
+            zapret::stop();
+        }
+        // New connections with (or without) the trick from now on.
+        let _ = self.client.set_proxy(self.settings.use_proxy());
+        if self.user.is_none() && self.client.has_token() {
+            self.check_login();
+        }
+        if let Err(e) = self.settings.save(&self.dir) {
+            eprintln!("bypass: settings not saved: {e}");
+        }
+        self.net = None;
+        self.net_checked = None;
+    }
+
     fn apply_settings(&mut self, mut new: Settings) -> String {
         if !["solid", "pulse", "eq"].contains(&new.light_mode.as_str()) {
             new.light_mode = "solid".into();
@@ -542,6 +572,7 @@ impl Controller {
         // Set only by «bypass auto/off», not by the settings form.
         new.bypass = self.settings.bypass.clone();
         new.zapret_args = self.settings.zapret_args.clone();
+        new.bypass_manual = self.settings.bypass_manual;
         let bypass_changed = new.active_bypass() != self.settings.active_bypass();
         if bypass_changed {
             bypass::set(bypass_strategy(new.active_bypass()));
@@ -634,13 +665,13 @@ impl Controller {
                 } else {
                     self.original = None;
                 }
-                alice::pause_native();
                 self.queue = tracks;
                 self.failures = 0;
                 if let Some((name, cmd)) = self.asked.take() {
                     self.history.set(name, cmd);
                 }
                 self.start(0);
+                pause_native_again(&self.shared);
                 respond(reply, &format!("OK {}", self.status()), None);
             }
             Ok(_) => respond(
@@ -966,8 +997,8 @@ impl Controller {
             }
             Intent::Default => {
                 if !self.queue.is_empty() {
-                    alice::pause_native();
                     self.set_paused(false);
+                    pause_native_again(&self.shared);
                     respond(reply, "OK", None);
                 } else if self.client.has_token() {
                     self.intent(Intent::Likes, reply);
@@ -993,7 +1024,11 @@ impl Controller {
                 self.intent(Intent::Default, reply);
             }
             Intent::Resume => {
+                // «Продолжи» reaches Alice's own player too: her paused Yandex
+                // Music would quietly start under SoundCloud. Pause it now and
+                // once more when her own answer to the phrase has arrived.
                 self.set_paused(false);
+                pause_native_again(&self.shared);
                 respond(reply, "OK", None);
             }
             Intent::Next => {
@@ -1277,6 +1312,36 @@ impl Controller {
             // fastest on, «bypass try nfq2» (or «bypass try nfqc <args from a .bat>»)
             // checks the chosen one and switches it on if it works, «bypass off».
             "bypass" => {
+                // «Включить без проверки»: «bypass set nfq3» or «bypass set nfqc <args>».
+                if let Some(rest) = arg.strip_prefix("set ") {
+                    let (id, args) = rest.trim().split_once(' ').unwrap_or((rest.trim(), ""));
+                    if id == zapret::CUSTOM && !args.trim().is_empty() {
+                        let _ = self.tx.send(Cmd::ZapretArgs(args.trim().to_owned()));
+                    }
+                    let custom = if id == zapret::CUSTOM && !args.trim().is_empty() { args.trim().to_owned() } else { self.settings.zapret_args.clone() };
+                    if bypass_strategy(id).is_none() {
+                        send_to(&reply, "error: нет такой стратегии".into());
+                        return;
+                    }
+                    if zapret::is_zapret(id) {
+                        if let Err(e) = zapret::start(&self.dir, id, &custom) {
+                            send_to(&reply, format!("error: {e}"));
+                            return;
+                        }
+                    }
+                    let _ = self.tx.send(Cmd::BypassManual(id.to_owned()));
+                    send_to(&reply, format!("OK: включено без проверки: {}. Колонка не будет менять её сама", bypass::name_of(id)));
+                    return;
+                }
+                if arg == "cancel" {
+                    if self.shared.bypass_busy.load(Ordering::Acquire) {
+                        bypass::CANCEL.store(true, Ordering::Release);
+                        send_to(&reply, "OK: останавливаю подбор…".into());
+                    } else {
+                        send_to(&reply, "OK: подбор не идёт".into());
+                    }
+                    return;
+                }
                 if arg == "off" {
                     let _ = self.tx.send(Cmd::Bypass(String::new()));
                     send_to(&reply, "OK: обход выключен, снова через прокси (если задан) или напрямую".into());
@@ -1308,6 +1373,7 @@ impl Controller {
                 let dir = self.dir.clone();
                 let shared = self.shared.clone();
                 shared.bypass_log.lock().unwrap().clear();
+                bypass::CANCEL.store(false, Ordering::Release);
                 thread::spawn(move || {
                     let log = |line: String| {
                         eprintln!("bypass: {line}");
@@ -1317,7 +1383,12 @@ impl Controller {
                         Some(id) => bypass::measure(&dir, id, &custom, &mut None, &log).map(|k| (id.clone(), k)),
                         None => bypass::pick(&dir, &custom, &log),
                     };
+                    let cancelled = bypass::CANCEL.swap(false, Ordering::AcqRel);
                     let r = match found {
+                        _ if cancelled => {
+                            zapret::restore(&dir, &was, &custom);
+                            "error: подбор отменён — оставлен прежний способ".to_owned()
+                        }
                         Some((id, kbps)) if kbps >= bypass::ENOUGH_KBPS => {
                             let _ = tx.send(Cmd::Bypass(id.clone()));
                             if id == "direct" {
@@ -1540,6 +1611,28 @@ impl Controller {
                 }
                 Cmd::Results(tracks) => self.results = tracks,
                 Cmd::Net(result) => {
+                    // The provider's DPI changes and a strategy that worked stops
+                    // getting through: after two failed checks in a row (about two
+                    // minutes) soundya picks a working one by itself, at most every
+                    // 10 minutes.
+                    if result.is_ok() || self.settings.active_bypass().is_empty() || self.settings.bypass_manual {
+                        self.net_fails = 0;
+                    } else {
+                        self.net_fails += 1;
+                        let due = self.repicked.is_none_or(|t| t.elapsed() > Duration::from_secs(600));
+                        if self.net_fails >= 2 && due && !self.shared.bypass_busy.load(Ordering::Acquire) {
+                            eprintln!("bypass: {} stopped getting through; picking again", self.settings.active_bypass());
+                            self.repicked = Some(std::time::Instant::now());
+                            self.net_fails = 0;
+                            let (otx, _orx) = mpsc::channel();
+                            self.control("bypass auto", otx);
+                        }
+                    }
+                    // SoundCloud answers again (bypass or proxy fixed): a login
+                    // check that failed while it did not is done again.
+                    if result.is_ok() && self.user.is_none() && self.client.has_token() {
+                        self.check_login();
+                    }
                     self.net = Some(result);
                     self.net_checking = false;
                     self.net_checked = Some(std::time::Instant::now());
@@ -1559,22 +1652,8 @@ impl Controller {
                         eprintln!("bypass: settings not saved: {e}");
                     }
                 }
-                Cmd::Bypass(id) => {
-                    // A found strategy is switched on; "" forgets it.
-                    self.settings.bypass_on = !id.is_empty();
-                    self.settings.bypass = id;
-                    bypass::set(bypass_strategy(self.settings.active_bypass()));
-                    if !zapret::is_zapret(self.settings.active_bypass()) {
-                        zapret::stop();
-                    }
-                    // New connections with (or without) the trick from now on.
-                    let _ = self.client.set_proxy(self.settings.use_proxy());
-                    if let Err(e) = self.settings.save(&self.dir) {
-                        eprintln!("bypass: settings not saved: {e}");
-                    }
-                    self.net = None;
-                    self.net_checked = None;
-                }
+                Cmd::Bypass(id) => self.switch_bypass(id, false),
+                Cmd::BypassManual(id) => self.switch_bypass(id, true),
                 Cmd::AirPlay(true) => {
                     // AirPlay took over: pause SoundCloud and Alice's own music.
                     alice::pause_native();
@@ -1678,6 +1757,25 @@ fn blocked_hint(e: &str) -> String {
     } else {
         e.to_owned()
     }
+}
+
+/// Pauses Alice's own player now and a few more times while soundya starts:
+/// she pauses Yandex Music to listen to a phrase and turns it back on when her
+/// answer is over, which can be after soundya has already started, and then
+/// both play at once.
+fn pause_native_again(shared: &Arc<Shared>) {
+    alice::pause_native();
+    let shared = shared.clone();
+    thread::spawn(move || {
+        // The first track may still be loading: pause her player anyway, the
+        // user asked for SoundCloud.
+        for wait in [800, 1500, 2500, 4000] {
+            thread::sleep(Duration::from_millis(wait));
+            if !shared.alice_music() {
+                alice::pause_native();
+            }
+        }
+    });
 }
 
 /// A soundcloud.com link without the share tracking (?utm_source=… #…).
@@ -1842,6 +1940,8 @@ fn daemon() {
         retries: 0,
         loading: Mutex::new(None),
         history: history::History::load(&state_dir()),
+        net_fails: 0,
+        repicked: None,
         asked: None,
         rng: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1893,6 +1993,18 @@ fn main() {
     let all: Vec<String> = std::env::args().collect();
     if all.first().is_some_and(|a| a.rsplit('/').next() == Some("avahi-publish-service")) {
         std::process::exit(airplay::publisher_main(&all[1..]));
+    }
+    // Ctrl+C and kill stop soundya even when it was started from a shell or a
+    // supervisor that ignores them (they are inherited as «ignored»).
+    {
+        extern "C" {
+            fn signal(sig: i32, handler: usize) -> usize;
+        }
+        const SIG_DFL: usize = 0;
+        unsafe {
+            signal(2, SIG_DFL); // SIGINT
+            signal(15, SIG_DFL); // SIGTERM
+        }
     }
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (cmd, rest) = match args.split_first() {

@@ -116,15 +116,37 @@ fn parse_mixer(out: &str) -> Option<u32> {
 }
 
 fn read_mixer() -> Option<u32> {
-    let out = std::process::Command::new("amixer").args(["cget", CONTROL]).output().ok()?;
+    let out = amixer()?.args(["cget", CONTROL]).output().ok()?;
     parse_mixer(&String::from_utf8_lossy(&out.stdout))
 }
 
+/// The firmware's amixer: in PATH, or — on Station Mini 1, where it is not —
+/// /system/workdir/bin/amixer with the firmware's ALSA libraries (as Luna runs it).
+fn amixer() -> Option<std::process::Command> {
+    const SYSTEM: &str = "/system/workdir/bin/amixer";
+    const LIBS: &str = "/bkupgrade/data/bundle/ap2/libs:/system/workdir/lib";
+    let in_path = std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|p| std::env::split_paths(&p).map(|d| d.join("amixer")).collect::<Vec<_>>())
+        .find(|p| crate::fsx::exists(p));
+    if let Some(p) = in_path {
+        return Some(std::process::Command::new(p));
+    }
+    if !crate::fsx::exists(std::path::Path::new(SYSTEM)) {
+        return None;
+    }
+    let mut c = std::process::Command::new(SYSTEM);
+    let inherited = std::env::var("LD_LIBRARY_PATH").unwrap_or_default();
+    c.env("LD_LIBRARY_PATH", if inherited.is_empty() { LIBS.to_owned() } else { format!("{LIBS}:{inherited}") });
+    Some(c)
+}
+
 fn write_mixer(value: u32) -> bool {
-    std::process::Command::new("amixer")
-        .args(["-q", "cset", CONTROL, &format!("{value},{value}")])
-        .status()
-        .is_ok_and(|s| s.success())
+    let amixer = |args: &[&str]| amixer().is_some_and(|mut c| c.args(args).status().is_ok_and(|s| s.success()));
+    // The control by its full name; on firmwares that name it differently,
+    // the simple control «Master» as set_volume.sh does.
+    amixer(&["-q", "cset", CONTROL, &format!("{value},{value}")])
+        || amixer(&["-q", "set", "Master", &format!("{}%", (value * 100 + 127) / 255)])
 }
 
 /// The value for `level`: learnt, or level×10 % of 255 as set_volume.sh would.
@@ -162,6 +184,34 @@ fn learn_later(n: i32) {
 pub fn set(target: i32) -> Result<i32, String> {
     let _one = BUSY.lock().unwrap();
     let target = target.clamp(0, MAX);
+    // Under Luna: its volume API (Alice's volume manager, else the mixer, done
+    // the way Luna knows works on this model).
+    if crate::luna::present() {
+        match crate::luna::volume(target * 10) {
+            Ok(()) => {
+                LEVEL.store(target, Ordering::Release);
+                return Ok(target);
+            }
+            Err(e) => eprintln!("volume: luna: {e}"),
+        }
+    }
+    // Best: Alice's own volume manager — she knows the new level, her buttons
+    // and «громче» go on from it.
+    // Firmwares without the service (Station Mini 1) refuse the connection:
+    // said once, then straight to the mixer.
+    static NO_MAIND: AtomicBool = AtomicBool::new(false);
+    if !NO_MAIND.load(Ordering::Acquire) {
+        match maind::set(target) {
+            Ok(()) => {
+                LEVEL.store(target, Ordering::Release);
+                return Ok(target);
+            }
+            Err(e) => {
+                NO_MAIND.store(true, Ordering::Release);
+                eprintln!("volume: Alice's volume manager is not available ({e}); using the mixer");
+            }
+        }
+    }
     if write_mixer(mixer_value(target, &learnt())) {
         LEVEL.store(target, Ordering::Release);
         return Ok(target);
@@ -179,6 +229,67 @@ pub fn set(target: i32) -> Result<i32, String> {
     }
     LEVEL.store(target, Ordering::Release);
     Ok(target)
+}
+
+/// Alice's volume manager (quasar's `volume_manager` IPC service, the port is in
+/// quasar.cfg): a SetVolumeSignal sets her level exactly as her buttons do, so
+/// she and the page share one volume. Message layout as in Luna
+/// (github.com/nyakokitsu/luna, gateway.rs, MIT).
+mod maind {
+    use std::{
+        io::Write,
+        net::{SocketAddr, TcpStream},
+        time::Duration,
+    };
+
+    const CONFIG: &str = "/system/vendor/quasar/quasar.cfg";
+
+    fn port() -> Option<u16> {
+        let text = crate::fsx::read_string(std::path::Path::new(CONFIG))?;
+        let cfg: serde_json::Value = serde_json::from_str(&text).ok()?;
+        cfg.get("volume_manager")?.get("port")?.as_u64().and_then(|p| u16::try_from(p).ok())
+    }
+
+    fn var(out: &mut Vec<u8>, mut v: u64) {
+        while v >= 0x80 {
+            out.push((v as u8 & 0x7f) | 0x80);
+            v >>= 7;
+        }
+        out.push(v as u8);
+    }
+
+    fn bytes(out: &mut Vec<u8>, field: u64, data: &[u8]) {
+        var(out, field << 3 | 2);
+        var(out, data.len() as u64);
+        out.extend_from_slice(data);
+    }
+
+    /// QuasarMessage { volume_manager_message (200): VolumeManager {
+    /// set_volume_signal (2): { platform_volume (1): 0..10000, muted (3), source (4) } } }
+    pub fn message(level: i32) -> Vec<u8> {
+        let mut signal = Vec::new();
+        var(&mut signal, 1 << 3);
+        var(&mut signal, (level.clamp(0, 10) as u64) * 1000);
+        var(&mut signal, 3 << 3);
+        var(&mut signal, 0);
+        bytes(&mut signal, 4, b"soundya");
+        let mut manager = Vec::new();
+        bytes(&mut manager, 2, &signal);
+        let mut message = Vec::new();
+        bytes(&mut message, 200, &manager);
+        message
+    }
+
+    pub fn set(level: i32) -> Result<(), String> {
+        let port = port().ok_or("no volume_manager port in quasar.cfg")?;
+        let addr = SocketAddr::from(([127, 0, 0, 1], port));
+        let mut s = TcpStream::connect_timeout(&addr, Duration::from_millis(700)).map_err(|e| e.to_string())?;
+        s.set_write_timeout(Some(Duration::from_millis(700))).ok();
+        let msg = message(level);
+        s.write_all(&(msg.len() as i32).to_le_bytes()).map_err(|e| e.to_string())?;
+        s.write_all(&msg).map_err(|e| e.to_string())?;
+        s.flush().map_err(|e| e.to_string())
+    }
 }
 
 const EV_SYN: u16 = 0;
@@ -333,6 +444,15 @@ mod tests {
         assert_eq!(level(), Some(10));
         heard("громкость на максимум");
         assert_eq!(level(), None);
+    }
+
+    #[test]
+    fn volume_manager_message() {
+        // Same bytes Luna sends for 60 % (platform_volume 6000), source differs.
+        let m = maind::message(6);
+        assert_eq!(&m[..3], &[0xc2, 0x0c, (m.len() - 3) as u8]);
+        assert!(m.windows(3).any(|w| w == [0x08, 0xf0, 0x2e]), "{m:x?}");
+        assert!(m.ends_with(b"soundya"));
     }
 
     #[test]

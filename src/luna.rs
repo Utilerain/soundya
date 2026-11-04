@@ -62,19 +62,113 @@ fn post(path: &str, body: &Value) -> Result<Option<Value>, String> {
     Ok(serde_json::from_str(&text).ok())
 }
 
+/// Luna's own API (`…/api`), from the runtime URL `…/api/runtime/<id>`.
+/// Luna's API: from the runtime URL when Luna started soundya, otherwise Luna
+/// found running on this speaker (127.0.0.1:8099 or 8100, looked up again
+/// every minute while it is not there).
+fn main_api() -> Option<String> {
+    if let Some(url) = api().map(|a| &a.url) {
+        return url.find("/api/runtime/").map(|i| url[..i + 4].to_owned());
+    }
+    static FOUND: std::sync::Mutex<Option<(Option<String>, Instant)>> = std::sync::Mutex::new(None);
+    let mut found = FOUND.lock().unwrap();
+    if let Some((base, at)) = found.as_ref() {
+        if base.is_some() || at.elapsed() < Duration::from_secs(60) {
+            return base.clone();
+        }
+    }
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_millis(300))
+        .timeout(Duration::from_secs(2))
+        .build();
+    let base = [8099u16, 8100].into_iter().map(|p| format!("http://127.0.0.1:{p}/api")).find(|b| {
+        agent.get(&format!("{b}/device")).call().is_ok_and(|r| r.status() == 200)
+    });
+    if let Some(b) = &base {
+        eprintln!("luna: found Luna at {b}; its volume and LED APIs are used");
+    }
+    *found = Some((base.clone(), Instant::now()));
+    base
+}
+
+/// Luna runs on this speaker (whether or not it started soundya).
+pub fn present() -> bool {
+    main_api().is_some()
+}
+
+/// A call to Luna's own API (the runtime token when there is one).
+fn post_main(path: &str, body: &Value) -> Result<(), String> {
+    let base = main_api().ok_or("no Luna on this speaker")?;
+    let agent = match api() {
+        Some(a) => a.agent.clone(),
+        None => ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(1)).timeout(Duration::from_secs(5)).build(),
+    };
+    let mut req = agent.post(&format!("{base}{path}")).set("Content-Type", "application/json");
+    if let Some(a) = api() {
+        req = req.set("X-Luna-Token", &a.token);
+    }
+    req.send_string(&body.to_string()).map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Alice's volume, 0..=100 %, through Luna (`POST /api/volume/set`).
+pub fn volume(percent: i32) -> Result<(), String> {
+    post_main("/volume/set", &json!({ "percent": percent.clamp(0, 100) }))
+}
+
 /// "#rrggbb" for Luna's LED API.
 pub fn hex((r, g, b): (u8, u8, u8)) -> String {
     format!("#{r:02X}{g:02X}{b:02X}")
 }
 
+/// The Station's light as Luna names it: "ring", or "logo" on models whose
+/// only light is the top one (Station Mini 1). Found on the first frame.
+static ZONE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+fn zone() -> &'static str {
+    if ZONE.load(Ordering::Relaxed) == 2 { "logo" } else { "ring" }
+}
+
 /// One ring frame; Luna spreads the colours over the physical LEDs.
 pub fn ring(colours: &[(u8, u8, u8)]) -> Result<(), String> {
     let colours: Vec<String> = colours.iter().copied().map(hex).collect();
-    post("/led/ring", &json!({ "colors": colours })).map(|_| ())
+    let body = json!({ "colors": colours });
+    let send = |path: &str, body: &Value| -> Result<(), String> {
+        if active() { post(path, body).map(|_| ()) } else { post_main(path, body) }
+    };
+    match send(&format!("/led/{}", zone()), &body) {
+        Ok(_) => {
+            ZONE.compare_exchange(0, 1, Ordering::Relaxed, Ordering::Relaxed).ok();
+            Ok(())
+        }
+        // No ring here: the logo light (Mini 1), from now on.
+        Err(e) if ZONE.load(Ordering::Relaxed) == 0 => {
+            send("/led/logo", &body).map_err(|l| format!("ring: {e}; logo: {l}"))?;
+            ZONE.store(2, Ordering::Relaxed);
+            eprintln!("led: luna: no ring on this Station, using its logo light");
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Luna on this speaker takes LED frames. Some builds have no LED API (404
+/// on both lights, seen on a Station Mini 1): then soundya drives the LEDs
+/// itself.
+pub fn has_led() -> bool {
+    match ring(&[(0, 0, 0)]) {
+        Ok(()) => true,
+        Err(e) if e.contains("404") => {
+            eprintln!("led: luna has no LED API here ({e})");
+            false
+        }
+        // Anything else (busy, a timeout): Luna's, as before.
+        Err(_) => true,
+    }
 }
 
 pub fn ring_off() -> Result<(), String> {
-    post("/led/off/ring", &json!({})).map(|_| ())
+    let path = format!("/led/off/{}", zone());
+    if active() { post(&path, &json!({})).map(|_| ()) } else { post_main(&path, &json!({})) }
 }
 
 /// What Luna is told: "playing", "paused" or "unknown". Stopped counts as

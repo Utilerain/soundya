@@ -11,6 +11,7 @@
 //! blocked, only a proxy or VPN helps — [`pick`] then reports that no strategy works.
 
 use std::{
+    sync::atomic::Ordering,
     io::{self, Read, Write},
     net::TcpStream,
     sync::{Arc, Mutex},
@@ -215,7 +216,7 @@ pub const ENOUGH_KBPS: f64 = 400.0;
 fn agent_for(strategy: Strategy) -> ureq::Agent {
     let mut b = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(6))
-        .timeout(Duration::from_secs(12))
+        .timeout(Duration::from_secs(8))
         .resolver(crate::dns::Resolver::new());
     if strategy != Strategy::Direct {
         b = b.tls_connector(Arc::new(Connector::new(strategy)));
@@ -230,6 +231,9 @@ fn works(agent: &ureq::Agent, strategy: Strategy) -> Result<(), String> {
     for url in CHECK {
         let mut ok = false;
         for attempt in 0..2 {
+            if CANCEL.load(Ordering::Acquire) {
+                return Err("проверка отменена".into());
+            }
             match agent.get(url).call() {
                 Ok(_) | Err(ureq::Error::Status(..)) => {
                     // Any HTTP answer: the connection went through.
@@ -238,6 +242,8 @@ fn works(agent: &ureq::Agent, strategy: Strategy) -> Result<(), String> {
                 }
                 Err(e) => {
                     eprintln!("bypass: {} on {url} (try {}): {e}", strategy.id(), attempt + 1);
+                    // The second try goes to another of the host's servers.
+                    crate::dns::failed(url);
                     std::thread::sleep(Duration::from_millis(700));
                 }
             }
@@ -312,6 +318,9 @@ pub fn measure(
     log(format!("{}: проверяю…", name_of(id)));
     let agent = agent_for(s);
     if let Err(host) = works(&agent, s) {
+        if host == "проверка отменена" {
+            return None;
+        }
         log(format!("{}: SoundCloud не открывается (нет ответа от {host})", name_of(id)));
         return None;
     }
@@ -333,46 +342,70 @@ pub fn measure(
 pub fn pick(dir: &std::path::Path, custom: &str, log: &dyn Fn(String)) -> Option<(String, f64)> {
     let mut best: Option<(String, f64)> = None;
     let mut file: Option<String> = None;
-    let mut ids: Vec<String> = std::iter::once(Strategy::Direct).chain(ALL).map(|s| s.id().to_owned()).collect();
-    let own = ids.len();
-    if crate::zapret::installed(dir) {
-        if !custom.trim().is_empty() {
-            ids.push(crate::zapret::CUSTOM.into());
-        }
-        ids.extend((0..crate::zapret::PRESETS.len()).map(crate::zapret::id_of));
+    let mut ids = order(crate::zapret::installed(dir), !custom.trim().is_empty());
+    if !crate::zapret::can_queue() {
+        log("zapret пропущен: ядро колонки не даёт перенаправить пакеты".into());
     }
-    for (n, id) in ids.iter().enumerate() {
-        // zapret only when soundya's own ways are not fast enough.
-        if n == own && best.as_ref().is_some_and(|(_, k)| *k >= ENOUGH_KBPS) {
+    // nfqws2 (zapret2) may be missing next to nfqws, or the other way round.
+    ids.retain(|id| !crate::zapret::is_zapret(id) || crate::zapret::can_run(dir, id, custom));
+    for id in &ids {
+        if CANCEL.load(Ordering::Acquire) {
+            log("подбор отменён".into());
             break;
         }
         let Some(kbps) = measure(dir, id, custom, &mut file, log) else { continue };
         if best.as_ref().map_or(true, |(_, b)| kbps > *b) {
             best = Some((id.clone(), kbps));
         }
-        // Fast enough with no trick at all: nothing better to look for.
-        if n == 0 && kbps >= 4.0 * ENOUGH_KBPS {
-            break;
-        }
-        if n >= own && kbps >= ENOUGH_KBPS {
+        // The first one fast enough to play from wins.
+        if kbps >= ENOUGH_KBPS {
             break;
         }
     }
     // Leave nfqws running only with the winner.
     match best.as_ref().filter(|(id, k)| crate::zapret::is_zapret(id) && *k >= ENOUGH_KBPS) {
-        Some((id, _)) => {
+        Some((id, _)) if !CANCEL.load(Ordering::Acquire) => {
             if let Err(e) = crate::zapret::start(dir, id, custom) {
                 eprintln!("bypass: zapret: {e}");
             }
         }
-        None => crate::zapret::stop(),
+        _ => crate::zapret::stop(),
     }
     best
 }
 
+/// What «Подобрать автоматически» tries, in turn: zapret first (the user's own
+/// arguments, then the presets: they get through most often), then soundya's
+/// own ClientHello tricks, and plain «напрямую» last.
+fn order(zapret: bool, custom: bool) -> Vec<String> {
+    let mut ids = Vec::new();
+    if zapret {
+        if custom {
+            ids.push(crate::zapret::CUSTOM.to_owned());
+        }
+        ids.extend((0..crate::zapret::PRESETS.len()).map(crate::zapret::id_of));
+    }
+    ids.extend(ALL.iter().map(|s| s.id().to_owned()));
+    ids.push(Strategy::Direct.id().to_owned());
+    ids
+}
+
+/// «Отменить» on the page: the running pick stops before the next strategy.
+pub static CANCEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zapret_is_tried_first() {
+        let ids = order(true, false);
+        assert_eq!(ids[0], "nfq1");
+        assert_eq!(ids.last().unwrap(), "direct");
+        assert!(ids.iter().position(|i| i == "split1").unwrap() > ids.iter().position(|i| i == "nfq12").unwrap());
+        assert_eq!(order(true, true)[0], crate::zapret::CUSTOM);
+        assert_eq!(order(false, false)[0], ALL[0].id());
+    }
 
     const HELLO: &[u8] = include_bytes!("../testdata/clienthello.bin");
     const NAME: &[u8] = b"api-v2.soundcloud.com";
