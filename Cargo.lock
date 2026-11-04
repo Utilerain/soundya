@@ -425,7 +425,7 @@ dependencies = [
 
 [[package]]
 name = "soundya"
-version = "0.4.29"
+version = "0.4.40-plum.1"
 dependencies = [
  "serde",
  "serde_json",
