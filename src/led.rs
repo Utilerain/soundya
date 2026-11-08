@@ -21,6 +21,11 @@ const ORANGE: (u8, u8, u8) = (255, 50, 0);
 const TICK_MS: u64 = 50;
 /// Alice quiet for this long before the ring is ours again.
 const IDLE_MS: u64 = 1000;
+/// After a button press or a volume change the firmware shows the volume on the
+/// ring: it is left to it for this long (from the last press)…
+const KEY_YIELD_MS: u64 = 2500;
+/// …and for this long after the LEDs last changed by someone else's hand.
+const FOREIGN_YIELD_MS: u64 = 1200;
 /// A playing track whose position has not moved for this long is loading.
 const STUCK_MS: u64 = 1500;
 /// One breath of the loading animation: fades out and back in.
@@ -54,7 +59,8 @@ fn mix(a: Rgb, b: Rgb, t: f32) -> Rgb {
 /// green, so the colour is gamma-corrected (2.2) the way a screen would.
 pub fn led_colour(hex: &str) -> Option<Rgb> {
     let h = hex.trim().trim_start_matches('#');
-    if h.len() != 6 {
+    // Bytes are checked, so «#aжbcd» (6 bytes) cannot cut a letter in half and panic.
+    if h.len() != 6 || !h.bytes().all(|c| c.is_ascii_hexdigit()) {
         return None;
     }
     let ch = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).ok();
@@ -67,7 +73,17 @@ pub enum Mode {
     Solid,
     Pulse,
     Eq,
+    /// A wave of the two colours going round the ring; brighter with the music.
+    Wave,
+    /// A turning rainbow; brighter with the music.
+    Rainbow,
+    /// Slow breathing in the «quiet» colour.
+    Breathe,
+    /// A comet running round the ring.
+    Running,
 }
+
+pub const MODES: [&str; 7] = ["solid", "pulse", "eq", "wave", "rainbow", "breathe", "running"];
 
 /// «Подсветка» from the settings.
 #[derive(Clone, Copy, Debug)]
@@ -78,6 +94,10 @@ pub struct Light {
     /// Equaliser: bass, middle, treble.
     pub bands: [Rgb; 3],
     pub bright: f32,
+    /// Animation speed, 1.0 = normal.
+    pub speed: f32,
+    /// How strongly the light follows the music, 1.0 = normal.
+    pub intensity: f32,
 }
 
 impl Light {
@@ -86,6 +106,10 @@ impl Light {
             mode: match s.light_mode.as_str() {
                 "pulse" => Mode::Pulse,
                 "eq" => Mode::Eq,
+                "wave" => Mode::Wave,
+                "rainbow" => Mode::Rainbow,
+                "breathe" => Mode::Breathe,
+                "running" => Mode::Running,
                 _ => Mode::Solid,
             },
             quiet: led_colour(&s.light_color).unwrap_or(ORANGE),
@@ -96,14 +120,21 @@ impl Light {
                 led_colour(&s.light_high).unwrap_or((255, 190, 18)),
             ],
             bright: (s.light_bright.clamp(10, 100) as f32) / 100.0,
+            speed: f32::from(s.light_speed.clamp(25, 300)) / 100.0,
+            intensity: f32::from(s.light_intensity.clamp(30, 200)) / 100.0,
         }
     }
 }
 
 /// One frame of the music light: a colour per zone. `smooth` holds the levels
 /// shown last (fast up, slow down, so the light does not flicker).
-fn music_frame(light: &Light, zones: usize, heard: Option<[f32; 3]>, smooth: &mut [f32; 3]) -> Vec<Rgb> {
-    let target = heard.unwrap_or([0.0; 3]);
+fn music_frame(light: &Light, zones: usize, heard: Option<[f32; 3]>, smooth: &mut [f32; 3], ms: u64) -> Vec<Rgb> {
+    let k = light.intensity;
+    let target = heard.map(|h| h.map(|v| (v * k).min(1.0))).unwrap_or([0.0; 3]);
+    let z = zones.max(1);
+    // Time at the chosen speed, in seconds.
+    let t = ms as f32 / 1000.0 * light.speed;
+    let loudness = |s: &[f32; 3]| (0.6 * s[0] + 0.3 * s[1] + 0.1 * s[2]).min(1.0);
     for i in 0..3 {
         smooth[i] = if target[i] > smooth[i] { target[i] } else { smooth[i] * 0.82 + target[i] * 0.18 };
     }
@@ -125,10 +156,55 @@ fn music_frame(light: &Light, zones: usize, heard: Option<[f32; 3]>, smooth: &mu
                 scale(light.bands[band], light.bright * (0.1 + 0.9 * level))
             })
             .collect(),
+        Mode::Wave => {
+            let lift = 0.55 + 0.45 * loudness(smooth);
+            (0..z)
+                .map(|i| {
+                    let phase = (i as f32 / z as f32 - t * 0.35) * std::f32::consts::TAU;
+                    let m = 0.5 + 0.5 * phase.sin();
+                    scale(mix(light.quiet, light.loud, m), light.bright * lift * (0.35 + 0.65 * m))
+                })
+                .collect()
+        }
+        Mode::Rainbow => {
+            let lift = 0.5 + 0.5 * loudness(smooth);
+            (0..z).map(|i| scale(hue(i as f32 / z as f32 + t * 0.12), light.bright * lift)).collect()
+        }
+        Mode::Breathe => {
+            let b = 0.5 + 0.5 * (t * std::f32::consts::TAU / 4.0).cos();
+            vec![scale(light.quiet, light.bright * (0.12 + 0.88 * b)); z]
+        }
+        Mode::Running => {
+            let head = (t * 1.6 * z as f32) % z as f32;
+            (0..z)
+                .map(|i| {
+                    let behind = (head - i as f32).rem_euclid(z as f32);
+                    let level = if behind < 1.0 { 1.0 } else { (1.0 - (behind - 1.0) / 2.5).max(0.05) };
+                    scale(mix(light.quiet, light.loud, level), light.bright * level)
+                })
+                .collect()
+        }
     }
 }
 
 /// Smooth fade out and in, 1 → BREATH_MIN → 1 over BREATH_MS.
+/// soundya's timer on the ring (timer.rs): the part of the ring still left lights up
+/// (work red, break green, a plain timer in the quiet colour), dimmer when paused;
+/// a ring of one zone cannot show a part, so only the end. At the end: blinking.
+pub fn timer_frame(zones: usize, left: f32, work: bool, plain: bool, paused: bool, ended: bool, quiet: Rgb, bright: f32, ms: u64) -> Option<Vec<Rgb>> {
+    let colour = if plain { quiet } else if work { (255, 30, 10) } else { (0, 200, 40) };
+    if ended {
+        let on = (ms / 300) % 2 == 0;
+        return Some(vec![if on { scale((255, 255, 255), bright) } else { (0, 0, 0) }; zones]);
+    }
+    if zones < 3 {
+        return None;
+    }
+    let level = bright * if paused { 0.12 } else { 0.35 };
+    let lit = (left.clamp(0.0, 1.0) * zones as f32).ceil() as usize;
+    Some((0..zones).map(|i| if i < lit { scale(colour, level) } else { (0, 0, 0) }).collect())
+}
+
 fn breath(ms: u64) -> f32 {
     let phase = (ms % BREATH_MS as u64) as f32 / BREATH_MS * std::f32::consts::TAU;
     BREATH_MIN + (1.0 - BREATH_MIN) * (0.5 + 0.5 * phase.cos())
@@ -138,13 +214,193 @@ struct Zone {
     r: PathBuf,
     g: PathBuf,
     b: PathBuf,
+    /// Each LED's `max_brightness` (0.4.40 assumed 255 everywhere and wrote
+    /// 0..255: on a driver with a smaller range the kernel clamps, so orange
+    /// (255, 50, 0) and red (255, 12, 0) both come out wrong).
+    max: [u32; 3],
 }
 
-fn brightness(path: &Path) -> Option<u8> {
+/// Channel orders: which colour the files red, green, blue actually light.
+const ORDERS: [(&str, [usize; 3]); 6] =
+    [("rgb", [0, 1, 2]), ("grb", [1, 0, 2]), ("brg", [2, 0, 1]), ("bgr", [2, 1, 0]), ("rbg", [0, 2, 1]), ("gbr", [1, 2, 0])];
+static ORDER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Sets the order from the settings ("rgb" … "gbr"); false if unknown.
+pub fn set_order(name: &str) -> bool {
+    match ORDERS.iter().position(|(n, _)| *n == name) {
+        Some(i) => {
+            ORDER.store(i, Ordering::Release);
+            true
+        }
+        None => false,
+    }
+}
+
+/// The ring test on the page: light one channel file (0 red, 1 green, 2 blue)
+/// of every zone as it is, without the order, for a few seconds.
+static TEST: std::sync::Mutex<Option<(usize, std::time::Instant)>> = std::sync::Mutex::new(None);
+const TEST_FOR: Duration = Duration::from_secs(6);
+
+pub fn test(channel: usize) -> Result<String, String> {
+    if channel > 2 {
+        return Err("канал 0, 1 или 2".into());
+    }
+    *TEST.lock().unwrap() = Some((channel, std::time::Instant::now()));
+    Ok(match RING.lock().unwrap().as_str() {
+        "" => "error: кольцо не найдено".into(),
+        _ => "OK: горит 6 секунд".into(),
+    })
+}
+
+/// First install (hello.rs): what the ring — and the clock display, if there
+/// is one (display.rs) — shows. Each profile draws it its own way.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Install {
+    /// soundya is starting, looking for the network.
+    Loading,
+    /// The address was said; waiting for «Начать установку» in the panel.
+    Waiting,
+    /// Wizard step n of total.
+    Step(u8, u8),
+    /// Finished: a short farewell, then the ring is free again.
+    Done,
+}
+
+static INSTALL: std::sync::Mutex<Option<(Install, std::time::Instant)>> = std::sync::Mutex::new(None);
+const DONE_MS: u64 = 2600;
+/// Nobody came to the panel: stop waiting on the ring (the voice command stays).
+const WAIT_MAX: Duration = Duration::from_secs(30 * 60);
+
+pub fn set_install(phase: Option<Install>) {
+    *INSTALL.lock().unwrap() = phase.map(|p| (p, std::time::Instant::now()));
+}
+
+/// The phase now; Done and Waiting end by themselves.
+pub fn install_phase() -> Option<Install> {
+    let mut g = INSTALL.lock().unwrap();
+    let expired = match g.as_ref() {
+        Some((Install::Done, at)) => at.elapsed() > Duration::from_millis(DONE_MS),
+        Some((Install::Waiting, at)) => at.elapsed() > WAIT_MAX,
+        _ => false,
+    };
+    if expired {
+        *g = None;
+    }
+    g.as_ref().map(|(p, _)| p.clone())
+}
+
+fn install_ms() -> u64 {
+    INSTALL.lock().unwrap().as_ref().map_or(0, |(_, at)| at.elapsed().as_millis() as u64)
+}
+
+/// Hue 0..1 → colour (for the farewell on six zones).
+fn hue(h: f32) -> Rgb {
+    let h = (h.rem_euclid(1.0)) * 6.0;
+    let x = 1.0 - (h % 2.0 - 1.0).abs();
+    let (r, g, b) = match h as u32 {
+        0 => (1.0, x, 0.0),
+        1 => (x, 1.0, 0.0),
+        2 => (0.0, 1.0, x),
+        3 => (0.0, x, 1.0),
+        4 => (x, 0.0, 1.0),
+        _ => (1.0, 0.0, x),
+    };
+    ((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
+}
+
+/// One frame of an install phase, `ms` into it, for a ring of `zones` in colour `c`.
+/// Three zones (Station Lite): zones light in turn, breathe, fill, flash.
+/// Six (Mini 1/2/3, Luna): a comet goes round, fills up, a rainbow sweeps.
+pub fn install_frame(phase: &Install, ms: u64, zones: usize, c: Rgb) -> Vec<Rgb> {
+    let z = zones.max(1);
+    let small = z <= 3;
+    match phase {
+        Install::Loading if small => (0..z)
+            .map(|i| {
+                let t = ((ms as f32 / 300.0) - i as f32).rem_euclid(z as f32);
+                scale(c, (1.0 - t).max(0.08))
+            })
+            .collect(),
+        Install::Loading => {
+            let head = (ms / 110) as usize % z;
+            (0..z).map(|i| scale(c, (1.0 - ((head + z - i) % z) as f32 / 3.0).max(0.04))).collect()
+        }
+        Install::Waiting if small => vec![scale(c, 0.6 * breath(ms)); z],
+        Install::Waiting => {
+            let head = (ms / 400) as usize % z;
+            (0..z).map(|i| scale(c, if i == head { 0.5 } else { 0.06 })).collect()
+        }
+        Install::Step(n, total) => {
+            let lit = ((*n as f32 / (*total).max(1) as f32) * z as f32).ceil() as usize;
+            (0..z).map(|i| scale(c, if i < lit { 1.0 } else { 0.06 })).collect()
+        }
+        Install::Done => {
+            let fade = 1.0 - (ms.saturating_sub(DONE_MS - 900) as f32 / 900.0).min(1.0);
+            if small {
+                let flash = ms < 600 && (ms / 150) % 2 == 0;
+                vec![scale(if flash { (255, 255, 255) } else { c }, fade); z]
+            } else {
+                (0..z).map(|i| scale(hue(i as f32 / z as f32 + ms as f32 / 1500.0), fade)).collect()
+            }
+        }
+    }
+}
+
+/// What was found, for the page and bug reports.
+static RING: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+pub fn info() -> serde_json::Value {
+    serde_json::json!({
+        "ring": *RING.lock().unwrap(),
+        "order": ORDERS[ORDER.load(Ordering::Acquire)].0,
+    })
+}
+
+impl Zone {
+    fn open(r: PathBuf, g: PathBuf, b: PathBuf) -> Zone {
+        let max = |p: &Path| {
+            crate::fsx::read_string(&p.with_file_name("max_brightness"))
+                .and_then(|t| t.trim().parse::<u32>().ok())
+                .filter(|m| *m > 0)
+                .unwrap_or(255)
+        };
+        let m = [max(&r), max(&g), max(&b)];
+        Zone { r, g, b, max: m }
+    }
+
+    /// What the three files get for colour `c`: in the channel order, scaled to their range.
+    fn values(&self, c: Rgb) -> [u32; 3] {
+        let comp = [c.0, c.1, c.2];
+        let order = ORDERS[ORDER.load(Ordering::Acquire)].1;
+        raw(self.max, [comp[order[0]], comp[order[1]], comp[order[2]]])
+    }
+
+    fn paths(&self) -> [&Path; 3] {
+        [&self.r, &self.g, &self.b]
+    }
+
+    fn put(&self, c: Rgb) {
+        for (p, v) in self.paths().into_iter().zip(self.values(c)) {
+            write(p, v);
+        }
+    }
+
+    fn shows(&self, c: Rgb) -> bool {
+        self.paths().into_iter().zip(self.values(c)).all(|(p, v)| brightness(p) == Some(v))
+    }
+}
+
+/// 0..255 per file → 0..max_brightness.
+fn raw(max: [u32; 3], v: [u8; 3]) -> [u32; 3] {
+    let f = |i: usize| (u32::from(v[i]) * max[i] + 127) / 255;
+    [f(0), f(1), f(2)]
+}
+
+fn brightness(path: &Path) -> Option<u32> {
     crate::fsx::read_string(path)?.trim().parse().ok()
 }
 
-fn write(path: &Path, value: u8) {
+fn write(path: &Path, value: u32) {
     let _ = fs::write(path, value.to_string());
 }
 
@@ -166,10 +422,13 @@ impl Ring {
         }
         // Station Lite: micro:red:ring1..3; Lite 2: plum:…:ring1..3; Mini 2: mini2:…:ring1..6.
         let sysfs = ["micro", "plum", "mini2"].into_iter().find_map(|board| {
+            // The Mini 2 wires its red and blue sysfs nodes the opposite way
+            // round, so orange came out blue; route the colours to match.
+            let (rc, bc) = if board == "mini2" { ("blue", "red") } else { ("red", "blue") };
             let zones: Vec<Zone> = (1..=6)
                 .map(|z| {
                     let p = |c: &str| PathBuf::from(format!("/sys/class/leds/{board}:{c}:ring{z}/brightness"));
-                    Zone { r: p("red"), g: p("green"), b: p("blue") }
+                    Zone::open(p(rc), p("green"), p(bc))
                 })
                 .filter(|z| crate::fsx::exists(&z.r) && crate::fsx::exists(&z.g) && crate::fsx::exists(&z.b))
                 .collect();
@@ -200,20 +459,24 @@ impl Ring {
 
     fn is(&self, (r, g, b): (u8, u8, u8)) -> bool {
         match self {
-            Ring::Sysfs(zones) => zones.iter().all(|z| {
-                brightness(&z.r) == Some(r) && brightness(&z.g) == Some(g) && brightness(&z.b) == Some(b)
-            }),
+            Ring::Sysfs(zones) => zones.iter().all(|z| z.shows((r, g, b))),
             // Neither can be read back.
             _ => false,
+        }
+    }
+
+    /// The raw values of every LED (sysfs only; the others cannot be read back).
+    fn snapshot(&self) -> Option<Vec<u32>> {
+        match self {
+            Ring::Sysfs(zones) => Some(zones.iter().flat_map(|z| z.paths().map(|p| brightness(p).unwrap_or(u32::MAX))).collect()),
+            _ => None,
         }
     }
 
     /// The ring shows exactly `frame` (one colour per zone)?
     fn shows(&self, frame: &[Rgb]) -> bool {
         match self {
-            Ring::Sysfs(zones) => zones.iter().zip(frame.iter().cycle()).all(|(z, &(r, g, b))| {
-                brightness(&z.r) == Some(r) && brightness(&z.g) == Some(g) && brightness(&z.b) == Some(b)
-            }),
+            Ring::Sysfs(zones) => zones.iter().zip(frame.iter().cycle()).all(|(z, &c)| z.shows(c)),
             // Write-only: what we drew last is assumed to be shown (after
             // Alice's animations the loop draws again anyway).
             _ => true,
@@ -224,13 +487,11 @@ impl Ring {
     fn draw(&self, frame: &[Rgb], before: Option<&[Rgb]>) {
         match self {
             Ring::Sysfs(zones) => {
-                for (i, (z, &(r, g, b))) in zones.iter().zip(frame.iter().cycle()).enumerate() {
-                    if before.and_then(|p| p.get(i)) == Some(&(r, g, b)) {
+                for (i, (z, &c)) in zones.iter().zip(frame.iter().cycle()).enumerate() {
+                    if before.and_then(|p| p.get(i)) == Some(&c) {
                         continue;
                     }
-                    write(&z.r, r);
-                    write(&z.g, g);
-                    write(&z.b, b);
+                    z.put(c);
                 }
             }
             Ring::Mini1(chip) => {
@@ -261,9 +522,7 @@ impl Ring {
         match self {
             Ring::Sysfs(zones) => {
                 for z in zones {
-                    write(&z.r, c.0);
-                    write(&z.g, c.1);
-                    write(&z.b, c.2);
+                    z.put(c);
                 }
             }
             Ring::Mini1(chip) => {
@@ -338,7 +597,7 @@ mod mini1 {
     const REG_UPDATE: u8 = 0x25;
     const REG_MODE: u8 = 0x26;
     const REG_FREQ: u8 = 0x4b;
-    const I2C_RDWR: u32 = 0x0707;
+    const I2C_RDWR: std::os::raw::c_ulong = 0x0707;
 
     #[repr(C)]
     struct Message {
@@ -355,7 +614,7 @@ mod mini1 {
     }
 
     extern "C" {
-        fn ioctl(fd: i32, request: u32, ...) -> i32;
+        fn ioctl(fd: i32, request: std::os::raw::c_ulong, ...) -> i32;
     }
 
     pub struct Chip(File);
@@ -432,12 +691,48 @@ mod mini1 {
     }
 }
 
+/// A button was pressed or the volume set: the firmware animates the ring now.
+static KEY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Called on the speaker's button presses and on every volume change.
+pub fn firmware_animates() {
+    KEY.store(true, Ordering::Release);
+}
+
+/// When the ring is ours again. Before 0.5.00 the loop redrew its frame the
+/// moment it saw another one, so with the firmware drawing the volume the two
+/// took turns every 40 ms and the ring blinked.
+#[derive(Default)]
+struct Yield {
+    wait_ms: u64,
+}
+
+impl Yield {
+    /// One tick: `pressed` — a button or a volume change since the last tick;
+    /// `foreign` — the LEDs changed and not by us. True when we may draw.
+    fn tick(&mut self, tick: u64, pressed: bool, foreign: bool) -> bool {
+        self.wait_ms = self.wait_ms.saturating_sub(tick);
+        if pressed {
+            self.wait_ms = self.wait_ms.max(KEY_YIELD_MS);
+        }
+        if foreign {
+            self.wait_ms = self.wait_ms.max(FOREIGN_YIELD_MS);
+        }
+        self.wait_ms == 0
+    }
+}
+
 pub fn run(shared: Arc<Shared>) {
     let Some(ring) = Ring::detect() else {
         eprintln!("led: no ring found, light disabled");
         return;
     };
-    eprintln!("led: ring found ({} zones{})", ring.zones(), ring.name());
+    let maxes = match &ring {
+        Ring::Sysfs(z) => z.first().map(|z| format!(", max_brightness {:?}", z.max)).unwrap_or_default(),
+        _ => String::new(),
+    };
+    eprintln!("led: ring found ({} zones{}{maxes})", ring.zones(), ring.name());
+    *RING.lock().unwrap() = format!("{} zones{}{maxes}", ring.zones(), ring.name());
     // Left lit by a previous run that was stopped or crashed.
     let light = *shared.light.lock().unwrap();
     if ring.is(ORANGE) || ring.is(scale(light.quiet, light.bright)) {
@@ -453,6 +748,9 @@ pub fn run(shared: Arc<Shared>) {
         // Position of the current track and how long it has not moved.
         let mut last_pos = u64::MAX;
         let mut still_ms = 0u64;
+        // What the LEDs held at the last tick (after our own writes), to see others' writes.
+        let mut seen: Option<Vec<u32>> = ring.snapshot();
+        let mut yielding = Yield::default();
         loop {
             let light = *shared.light.lock().unwrap();
             let on = shared.ring.load(Ordering::Acquire);
@@ -463,7 +761,11 @@ pub fn run(shared: Arc<Shared>) {
             let tick = if on && music && light.mode != Mode::Solid { 40 } else { TICK_MS };
             thread::sleep(Duration::from_millis(tick));
             clock += tick;
-            let alice_busy = shared.duck.active();
+            let now_seen = ring.snapshot();
+            let foreign = now_seen.is_some() && seen.is_some() && now_seen != seen;
+            seen = now_seen;
+            let free = yielding.tick(tick, KEY.swap(false, Ordering::AcqRel), foreign);
+            let alice_busy = shared.duck.active() || !free;
             idle_ms = if alice_busy { 0 } else { idle_ms.saturating_add(tick) };
 
             let track = shared.track.lock().unwrap().clone();
@@ -480,14 +782,53 @@ pub fn run(shared: Arc<Shared>) {
                     false
                 }
             };
+            // The first install (hello.rs): over the music light, never over Alice.
+            if let Some(phase) = install_phase() {
+                if !shared.duck.active() {
+                    ring.draw(&install_frame(&phase, install_ms(), zones, scale(light.quiet, light.bright)), None);
+                    shown = None;
+                    continue;
+                }
+            }
+            // The ring test from the page: one raw channel file, ignoring the order.
+            let test = TEST.lock().unwrap().filter(|(_, at)| at.elapsed() < TEST_FOR).map(|(c, _)| c);
+            if let (Some(ch), Ring::Sysfs(zones)) = (test, &ring) {
+                for z in zones {
+                    let mut v = [0u8; 3];
+                    v[ch] = 255;
+                    for (p, x) in z.paths().into_iter().zip(raw(z.max, v)) {
+                        write(p, x);
+                    }
+                }
+                shown = None;
+                continue;
+            }
+            if let (Some(ch), false) = (test, matches!(ring, Ring::Sysfs(_))) {
+                // Other rings take colours, not files: show the pure colour.
+                let mut c = (0, 0, 0);
+                match ch { 0 => c.0 = 255, 1 => c.1 = 255, _ => c.2 = 255 }
+                ring.set(c);
+                shown = None;
+                continue;
+            }
+            if TEST.lock().unwrap().take_if(|(_, at)| at.elapsed() >= TEST_FOR).is_some() {
+                ring.set((0, 0, 0));
+            }
             let loading = shared.fetching.load(Ordering::Acquire) || stuck;
-            let want: Option<Vec<Rgb>> = if !on {
+            // soundya's timer: the end blinks over everything; the time left only while no music plays.
+            let timer = crate::timer::ring_state().and_then(|(left, work, paused, ended)| {
+                let plain = crate::timer::current().is_some_and(|t| t.kind != "pomodoro");
+                (ended || !(music || loading)).then(|| timer_frame(zones, left, work, plain, paused, ended, light.quiet, light.bright, clock)).flatten()
+            });
+            let want: Option<Vec<Rgb>> = if let Some(frame) = timer {
+                Some(frame)
+            } else if !on {
                 None
             } else if loading {
                 // Breathing: the speaker is working on it.
                 Some(vec![scale(light.quiet, light.bright * breath(clock)); zones])
             } else if music {
-                Some(music_frame(&light, zones, crate::vis::now(), &mut smooth))
+                Some(music_frame(&light, zones, crate::vis::now(), &mut smooth, clock))
             } else if track.as_ref().is_some_and(|f| f.paused.load(Ordering::Acquire)) {
                 // Paused: dim, so it is clear SoundCloud is still there.
                 Some(vec![scale(light.quiet, light.bright * PAUSED); zones])
@@ -514,13 +855,122 @@ pub fn run(shared: Arc<Shared>) {
                     shown = None;
                 }
             }
+            // Our own writes are not someone else's animation.
+            seen = ring.snapshot();
         }
     });
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn led_colour_rejects_non_ascii_without_panic() {
+        assert_eq!(super::led_colour("#aжbcd"), None);
+        assert_eq!(super::led_colour("#+f+f+f"), None);
+        assert!(super::led_colour("#ff7a00").is_some());
+    }
+
     use super::*;
+
+    #[test]
+    fn the_timer_shows_what_is_left() {
+        let f = timer_frame(12, 0.5, true, false, false, false, (255, 0, 0), 1.0, 0).unwrap();
+        assert_eq!(f.iter().filter(|c| **c != (0, 0, 0)).count(), 6, "half the ring");
+        assert!(f[0].0 > f[0].1, "work is red");
+        let b = timer_frame(12, 1.0, false, false, false, false, (255, 0, 0), 1.0, 0).unwrap();
+        assert!(b[11].1 > b[11].0, "the break is green, the whole ring at the start");
+        assert!(timer_frame(1, 0.5, true, false, false, false, (255, 0, 0), 1.0, 0).is_none(), "one zone: only the end");
+        let end = timer_frame(1, 0.0, true, false, false, true, (255, 0, 0), 1.0, 0).unwrap();
+        assert_eq!(end, vec![(255, 255, 255)]);
+        assert_eq!(timer_frame(1, 0.0, true, false, false, true, (255, 0, 0), 1.0, 300).unwrap(), vec![(0, 0, 0)], "blinks");
+    }
+
+    #[test]
+    fn leaves_the_ring_to_the_firmware_after_a_press() {
+        // Before: the loop redrew at once when the firmware drew the volume (blinking).
+        let mut y = Yield::default();
+        assert!(y.tick(40, false, false), "nothing happened: ours");
+        assert!(!y.tick(40, true, false), "volume button pressed");
+        let mut t = 0;
+        while !y.tick(40, false, false) {
+            t += 40;
+            assert!(t < 10_000);
+        }
+        assert!(t + 40 >= KEY_YIELD_MS, "waited {t} ms after the press");
+        // The firmware keeps animating: every change it makes pushes us back.
+        assert!(!y.tick(40, false, true));
+        for _ in 0..100 {
+            assert!(!y.tick(40, false, true), "still animating");
+        }
+        let mut t = 0;
+        while !y.tick(40, false, false) {
+            t += 40;
+        }
+        assert!(t + 40 >= FOREIGN_YIELD_MS && t < KEY_YIELD_MS, "after the animation stopped: {t} ms");
+        // A press during a long wait never shortens it.
+        let mut y = Yield::default();
+        y.tick(40, true, false);
+        y.tick(40, false, true);
+        assert!(y.wait_ms > FOREIGN_YIELD_MS);
+    }
+
+    #[test]
+    fn scales_to_the_drivers_range_and_order() {
+        // A driver with 0..31 (not 0..255): orange keeps its proportions.
+        assert_eq!(raw([31, 31, 31], [255, 50, 0]), [31, 6, 0]);
+        assert_eq!(raw([255, 255, 255], [255, 50, 0]), [255, 50, 0], "0.4.40 behaviour on 255");
+        let z = Zone { r: "r".into(), g: "g".into(), b: "b".into(), max: [255; 3] };
+        assert!(set_order("grb"));
+        assert_eq!(z.values((255, 50, 0)), [50, 255, 0], "the red file lights green");
+        assert!(set_order("bgr"));
+        assert_eq!(z.values((1, 2, 3)), [3, 2, 1]);
+        assert!(!set_order("xyz"));
+        assert!(set_order("rgb"));
+        assert_eq!(z.values((1, 2, 3)), [1, 2, 3]);
+    }
+
+    #[test]
+    fn new_effects_move_and_follow_the_music() {
+        let base = Light { mode: Mode::Wave, quiet: (255, 0, 0), loud: (0, 0, 255), bands: [(0, 0, 0); 3], bright: 1.0, speed: 1.0, intensity: 1.0 };
+        for mode in [Mode::Wave, Mode::Rainbow, Mode::Breathe, Mode::Running] {
+            let l = Light { mode, ..base };
+            let a = music_frame(&l, 6, None, &mut [0.0; 3], 0);
+            let b = music_frame(&l, 6, None, &mut [0.0; 3], 700);
+            assert_eq!(a.len(), 6);
+            assert_ne!(a, b, "{mode:?} moves");
+            // Faster speed: the same picture sooner.
+            let fast = Light { speed: 2.0, ..l };
+            assert_eq!(music_frame(&fast, 6, None, &mut [0.0; 3], 350), b, "{mode:?} speed");
+        }
+        // Wave and rainbow get brighter with the music.
+        let sum = |f: Vec<Rgb>| f.iter().map(|c| c.0 as u32 + c.1 as u32 + c.2 as u32).sum::<u32>();
+        let r = Light { mode: Mode::Rainbow, ..base };
+        assert!(sum(music_frame(&r, 6, Some([1.0; 3]), &mut [0.0; 3], 0)) > sum(music_frame(&r, 6, None, &mut [0.0; 3], 0)));
+        // Intensity: a weak signal counts more.
+        let weak = Light { mode: Mode::Pulse, intensity: 2.0, ..base };
+        let normal = Light { mode: Mode::Pulse, ..base };
+        assert!(sum(music_frame(&weak, 3, Some([0.3; 3]), &mut [0.0; 3], 0)) > sum(music_frame(&normal, 3, Some([0.3; 3]), &mut [0.0; 3], 0)));
+    }
+
+    #[test]
+    fn install_animations_per_profile() {
+        let c = (200, 100, 0);
+        // Lite (3 zones): one zone leads, the others are dim.
+        let f = install_frame(&Install::Loading, 0, 3, c);
+        assert_eq!(f.len(), 3);
+        assert_eq!(f[0], c);
+        assert!(f[1].0 < 100 && f[2].0 < 100, "{f:?}");
+        // Six zones: the comet moves.
+        assert_ne!(install_frame(&Install::Loading, 0, 6, c), install_frame(&Install::Loading, 120, 6, c));
+        // Steps fill the ring: 2 of 4 → half lit.
+        let f = install_frame(&Install::Step(2, 4), 0, 6, c);
+        assert_eq!(f.iter().filter(|x| x.0 == 200).count(), 3);
+        // The farewell fades to dark; six zones get colours, not only the accent.
+        assert!(install_frame(&Install::Done, DONE_MS, 6, c).iter().all(|x| *x == (0, 0, 0)));
+        let rainbow = install_frame(&Install::Done, 0, 6, c);
+        assert!(rainbow.iter().any(|x| x.2 > 100), "{rainbow:?}");
+        assert_eq!(install_frame(&Install::Done, 100, 3, c)[0], (255, 255, 255), "Lite flashes");
+    }
 
     #[test]
     fn mini3_frame_order() {
@@ -549,20 +999,22 @@ mod tests {
             loud: (0, 0, 255),
             bands: [(0, 0, 255), (0, 255, 0), (255, 0, 0)],
             bright: 1.0,
+            speed: 1.0,
+            intensity: 1.0,
         };
         let mut smooth = [0.0; 3];
-        let f = music_frame(&light, 3, Some([1.0, 0.0, 0.0]), &mut smooth);
+        let f = music_frame(&light, 3, Some([1.0, 0.0, 0.0]), &mut smooth, 0);
         assert_eq!(f[0], (0, 0, 255), "loud bass: full bass colour");
         assert!(f[2].0 < 40 && f[2].1 == 0 && f[2].2 == 0, "quiet treble: dim treble colour {:?}", f[2]);
-        let f6 = music_frame(&light, 6, Some([1.0, 0.0, 0.0]), &mut [0.0; 3]);
+        let f6 = music_frame(&light, 6, Some([1.0, 0.0, 0.0]), &mut [0.0; 3], 0);
         assert_eq!(f6[0], f6[5]);
         // Falls slowly, not at once.
-        let after = music_frame(&light, 3, Some([0.0; 3]), &mut smooth);
+        let after = music_frame(&light, 3, Some([0.0; 3]), &mut smooth, 0);
         assert!(after[0].2 > 150, "{:?}", after[0]);
         let pulse = Light { mode: Mode::Pulse, ..light };
-        assert_eq!(music_frame(&pulse, 3, Some([1.0; 3]), &mut [0.0; 3])[0], (0, 0, 255), "pulse: loud colour");
+        assert_eq!(music_frame(&pulse, 3, Some([1.0; 3]), &mut [0.0; 3], 0)[0], (0, 0, 255), "pulse: loud colour");
         let solid = Light { mode: Mode::Solid, bright: 0.5, ..light };
-        assert_eq!(music_frame(&solid, 3, None, &mut [0.0; 3]), vec![(128, 0, 0); 3]);
+        assert_eq!(music_frame(&solid, 3, None, &mut [0.0; 3], 0), vec![(128, 0, 0); 3]);
     }
 
     #[test]

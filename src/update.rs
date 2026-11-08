@@ -34,6 +34,8 @@ pub struct Release {
     /// The same file through the API (another host, another certificate).
     api_url: String,
     size: u64,
+    /// "sha256:<hex>" as GitHub reports it for the asset ("" on older releases).
+    digest: String,
 }
 
 #[derive(Default)]
@@ -41,8 +43,21 @@ pub struct Updates {
     latest: Mutex<Option<Release>>,
     checked: Mutex<Option<Instant>>,
     error: Mutex<Option<String>>,
-    installing: AtomicBool,
     state: Mutex<Option<String>>,
+}
+
+/// The developer build is put on by hand; a release from GitHub would replace it.
+#[cfg(feature = "dev")]
+fn dev_build() -> Result<(), String> {
+    Err(format!(
+        "это сборка разработчика ({}): обновление из GitHub выключено, чтобы её не затереть; ставьте dev-архив мастером или scripts/deploy.sh",
+        crate::VERSION
+    ))
+}
+
+#[cfg(not(feature = "dev"))]
+fn dev_build() -> Result<(), String> {
+    Ok(())
 }
 
 /// "v0.4.10" → (0, 4, 10); anything unreadable is (0, 0, 0).
@@ -63,6 +78,7 @@ fn release_from(v: &Value) -> Option<Release> {
         url: asset.get("browser_download_url")?.as_str()?.to_owned(),
         api_url: asset.get("url").and_then(Value::as_str).unwrap_or("").to_owned(),
         size: asset.get("size").and_then(Value::as_u64).unwrap_or(0),
+        digest: asset.get("digest").and_then(Value::as_str).unwrap_or("").to_owned(),
     })
 }
 
@@ -88,7 +104,7 @@ impl Updates {
             Ok(r) => {
                 *self.error.lock().unwrap() = None;
                 *self.latest.lock().unwrap() = Some(r.clone());
-                Ok(newer(&r.version, env!("CARGO_PKG_VERSION")).then_some(r))
+                Ok(newer(&r.version, crate::VERSION).then_some(r))
             }
             Err(e) => {
                 eprintln!("update: cannot check: {e}");
@@ -100,15 +116,16 @@ impl Updates {
 
     pub fn json(&self) -> Value {
         let latest = self.latest.lock().unwrap().clone();
-        let current = env!("CARGO_PKG_VERSION");
+        let current = crate::VERSION;
         serde_json::json!({
             "current": current,
             "latest": latest.as_ref().map(|r| r.version.clone()),
             "available": latest.as_ref().is_some_and(|r| newer(&r.version, current)),
             "notes": latest.as_ref().map(|r| r.notes.clone()),
-            "installing": self.installing.load(Ordering::Acquire),
+            "installing": INSTALLING.load(Ordering::Acquire),
             "state": *self.state.lock().unwrap(),
             "error": *self.error.lock().unwrap(),
+            "last": last_result(&state_dir()),
         })
     }
 
@@ -125,12 +142,19 @@ impl Updates {
         if crate::luna::active() {
             return Err("soundya стоит как пакет Luna: обновите его через YAM — yam install rodyatotu/soundya".into());
         }
-        if self.installing.swap(true, Ordering::AcqRel) {
+        dev_build()?;
+        // The archive the speaker is asking about lies at the same path: downloading
+        // over it would install something else after «Алиса, да».
+        if awaiting() {
+            return Err("колонка ждёт «Алиса, да» для обновления с компьютера".into());
+        }
+        if INSTALLING.swap(true, Ordering::AcqRel) {
             return Err("обновление уже устанавливается".into());
         }
+        *LAST_STUCK.lock().unwrap() = None;
         let result = self.install_inner(proxy);
         if result.is_err() {
-            self.installing.store(false, Ordering::Release);
+            INSTALLING.store(false, Ordering::Release);
         }
         result
     }
@@ -138,7 +162,7 @@ impl Updates {
     fn install_inner(&self, proxy: &str) -> Result<String, String> {
         let release = match self.check(proxy)? {
             Some(r) => r,
-            None => return Err(format!("уже стоит последняя версия {}", env!("CARGO_PKG_VERSION"))),
+            None => return Err(format!("уже стоит последняя версия {}", crate::VERSION)),
         };
         self.set_state(&format!("скачиваю {}…", release.version));
         let mut last = String::new();
@@ -181,7 +205,61 @@ impl Updates {
         if !done {
             return Err(format!("не скачалось: {last}"));
         }
-        self.set_state(&format!("устанавливаю {}…", release.version));
+        if let Err(e) = verify_digest(TAR, &release.digest) {
+            let _ = std::fs::remove_file(TAR);
+            return Err(e);
+        }
+        self.start_installer(&release.version)
+    }
+
+    /// An archive sent by the Mac/Windows app over the network (its «Обновить»
+    /// when ADB is closed), saved at UPLOAD: checked, then the speaker asks out loud
+    /// and installs only after «Алиса, да» (confirm_uploaded) within a minute.
+    pub fn offer_uploaded(&self) -> Result<String, String> {
+        if crate::luna::active() {
+            return Err("soundya стоит как пакет Luna: обновите его через YAM".into());
+        }
+        let listing = Command::new("tar").arg("-tf").arg(TAR).output().map_err(|e| format!("tar: {e}"))?;
+        if !package_ok(&String::from_utf8_lossy(&listing.stdout)) {
+            let _ = std::fs::remove_file(TAR);
+            return Err("это не архив soundya (нет soundya/install.sh и программы)".into());
+        }
+        let version = Command::new("tar")
+            .args(["-xOf", TAR, "soundya/VERSION"])
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_default();
+        *OFFER.lock().unwrap() = Some((version.clone(), Instant::now()));
+        self.set_state("жду подтверждения на колонке: «Алиса, да»");
+        crate::alice::say(format!("Пришло обновление саундя {version} с компьютера. Установить? Скажите: Алиса, да. Или: Алиса, нет"));
+        Ok(format!("Колонка спрашивает, ставить ли soundya {version}: скажите ей «Алиса, да» в течение минуты"))
+    }
+
+    /// «Да» / «нет» to the offered archive.
+    pub fn confirm_uploaded(&self, yes: bool) -> String {
+        let Some((version, at)) = OFFER.lock().unwrap().take() else { return "Нечего устанавливать".into() };
+        if !yes || at.elapsed() > OFFER_FOR {
+            let _ = std::fs::remove_file(TAR);
+            self.set_state("обновление из приложения отменено");
+            return if yes { "Время на подтверждение вышло, нажмите Обновить ещё раз".into() } else { "Хорошо, не устанавливаю".into() };
+        }
+        if INSTALLING.swap(true, Ordering::AcqRel) {
+            return "Обновление уже устанавливается".into();
+        }
+        *LAST_STUCK.lock().unwrap() = None;
+        match self.start_installer(&version) {
+            Ok(_) => format!("Устанавливаю саундя {version}. Через минуту вернусь"),
+            Err(e) => {
+                INSTALLING.store(false, Ordering::Release);
+                format!("Не получилось: {e}")
+            }
+        }
+    }
+
+    fn start_installer(&self, version: &str) -> Result<String, String> {
+        self.set_state(&format!("устанавливаю {version}…"));
         // Unpack, then run the installer in its own session: it stops soundya
         // (this very process) and starts the new one. The pause lets this
         // answer reach the page first.
@@ -198,7 +276,112 @@ impl Updates {
         if !String::from_utf8_lossy(&out.stdout).contains("started") {
             return Err(format!("архив не распаковался: {}", String::from_utf8_lossy(&out.stderr).trim()));
         }
-        Ok(format!("Устанавливаю soundya {}. Через полминуты страница обновится сама", release.version))
+        // If this process is still alive long after, the installer stopped
+        // before restarting soundya: say so instead of «устанавливаю…» forever.
+        // (When it works, or rolls back, this process is replaced first.)
+        let started = Instant::now();
+        let version = version.to_owned();
+        let said = version.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(240));
+            let tail = crate::fsx::read_string(std::path::Path::new(LOG)).unwrap_or_default();
+            let tail: String = tail.lines().rev().take(3).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" / ");
+            eprintln!("update: installer for {version} did not finish in {} s: {tail}", started.elapsed().as_secs());
+            INSTALLING.store(false, Ordering::Release);
+            *LAST_STUCK.lock().unwrap() = Some(format!("установка {version} не завершилась: {tail}"));
+        });
+        Ok(format!("Устанавливаю soundya {said}. Через полминуты страница обновится сама"))
+    }
+}
+
+/// Where an archive from the app is saved before it is checked and confirmed.
+pub const UPLOAD: &str = TAR;
+/// The biggest archive accepted over the network (the real one is ~7 MB).
+pub const UPLOAD_MAX: usize = 48 << 20;
+/// An archive from the app waiting for «Алиса, да»: (version, since).
+static OFFER: Mutex<Option<(String, Instant)>> = Mutex::new(None);
+const OFFER_FOR: Duration = Duration::from_secs(60);
+
+/// The speaker asked «установить?» a moment ago.
+pub fn awaiting() -> bool {
+    OFFER.lock().unwrap().as_ref().is_some_and(|(_, at)| at.elapsed() < OFFER_FOR)
+}
+
+/// Takes the update slot for an archive arriving from the app: no upload over an
+/// archive being installed or one the speaker is asking about (the file is shared).
+/// `end_upload` gives the slot back once the archive is offered or refused.
+pub fn begin_upload() -> Result<(), &'static str> {
+    if awaiting() {
+        return Err("колонка уже спрашивает про другое обновление, ответьте ей «Алиса, да» или «нет»");
+    }
+    if INSTALLING.swap(true, Ordering::AcqRel) {
+        return Err("обновление уже устанавливается");
+    }
+    Ok(())
+}
+
+pub fn end_upload() {
+    INSTALLING.store(false, Ordering::Release);
+}
+
+/// A soundya package: its installer and the program, nothing outside «soundya/».
+pub fn package_ok(listing: &str) -> bool {
+    let names: Vec<&str> = listing.lines().map(|l| l.trim().trim_start_matches("./")).filter(|l| !l.is_empty()).collect();
+    names.contains(&"soundya/install.sh")
+        && names.contains(&"soundya/soundya")
+        && names.iter().all(|n| n.starts_with("soundya/") || *n == "soundya")
+        && !names.iter().any(|n| n.split('/').any(|p| p == ".."))
+}
+
+/// An update is being installed (there is one updater per process).
+static INSTALLING: AtomicBool = AtomicBool::new(false);
+static LAST_STUCK: Mutex<Option<String>> = Mutex::new(None);
+
+fn state_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from(std::env::var("SOUNDYA_DIR").unwrap_or_else(|_| "/data/opt/soundya".into()))
+}
+
+/// What install.sh wrote about the last update (status ok | rolledback | failed).
+pub fn last_result(dir: &std::path::Path) -> Value {
+    if let Some(stuck) = LAST_STUCK.lock().unwrap().clone() {
+        return serde_json::json!({ "status": "failed", "reason": stuck });
+    }
+    let Some(text) = crate::fsx::read_string(&dir.join("update-result")) else {
+        return Value::Null;
+    };
+    let mut out = serde_json::Map::new();
+    for line in text.lines() {
+        if let Some((k, v)) = line.split_once('=') {
+            if matches!(k, "status" | "from" | "to" | "time" | "reason") {
+                let v = v.trim();
+                out.insert(k.to_owned(), if k == "time" { v.parse::<u64>().map(Value::from).unwrap_or(Value::Null) } else { Value::from(v) });
+            }
+        }
+    }
+    Value::Object(out)
+}
+
+/// Checks the downloaded file against the SHA-256 GitHub reports for the asset,
+/// with the speaker's own `sha256sum` (busybox). Without a digest (older
+/// releases) or without the tool only the size is checked, as before.
+fn verify_digest(path: &str, digest: &str) -> Result<(), String> {
+    let Some(want) = digest.strip_prefix("sha256:").map(str::to_lowercase) else {
+        eprintln!("update: the release gives no sha256; checked by size only");
+        return Ok(());
+    };
+    let out = match Command::new("sha256sum").arg(path).output() {
+        Ok(o) if o.status.success() => o,
+        _ => {
+            eprintln!("update: sha256sum not available; checked by size only");
+            return Ok(());
+        }
+    };
+    let got = String::from_utf8_lossy(&out.stdout).split_whitespace().next().unwrap_or("").to_lowercase();
+    if got == want {
+        eprintln!("update: sha256 OK");
+        Ok(())
+    } else {
+        Err(format!("скачанный архив повреждён (sha256 {got} вместо {want})"))
     }
 }
 
@@ -262,6 +445,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn only_a_soundya_package_is_offered() {
+        let ok = "soundya/\nsoundya/install.sh\nsoundya/soundya\nsoundya/VERSION\nsoundya/lua/x.lua\n";
+        assert!(package_ok(ok));
+        assert!(!package_ok("soundya/\nsoundya/install.sh\n"), "no program");
+        assert!(!package_ok(&format!("{ok}etc/passwd\n")), "a file outside soundya/");
+        assert!(!package_ok(&format!("{ok}soundya/../../etc/x\n")), "climbing out");
+        assert!(!package_ok(""));
+    }
+
+    #[test]
+    fn nothing_is_installed_without_yes() {
+        let u = Updates::default();
+        assert!(!awaiting());
+        assert_eq!(u.confirm_uploaded(true), "Нечего устанавливать", "«да» with no offer does nothing");
+        *OFFER.lock().unwrap() = Some(("0.5.1".into(), Instant::now()));
+        assert!(awaiting());
+        assert_eq!(u.confirm_uploaded(false), "Хорошо, не устанавливаю");
+        assert!(!awaiting(), "a «нет» ends the offer");
+        *OFFER.lock().unwrap() = Some(("0.5.1".into(), Instant::now() - OFFER_FOR - Duration::from_secs(1)));
+        assert!(!awaiting());
+        assert!(u.confirm_uploaded(true).contains("Время"), "a late «да» installs nothing");
+        assert!(!INSTALLING.load(Ordering::Acquire));
+        // The archive file is shared: no second upload while one is offered or being received.
+        *OFFER.lock().unwrap() = Some(("0.5.1".into(), Instant::now()));
+        assert!(begin_upload().is_err(), "not over the archive the speaker is asking about");
+        *OFFER.lock().unwrap() = None;
+        assert!(begin_upload().is_ok());
+        assert!(begin_upload().is_err(), "not two uploads at once");
+        end_upload();
+        assert!(!INSTALLING.load(Ordering::Acquire));
+    }
+
+    #[test]
     fn compares_versions() {
         assert!(newer("0.4.2", "0.4.1"));
         assert!(newer("v0.10.0", "0.9.9"));
@@ -286,5 +502,37 @@ mod tests {
         assert_eq!(r.url, "https://x/soundya-armv7.tar");
         assert_eq!(r.size, 2_649_088);
         assert!(release_from(&serde_json::json!({"tag_name": "v1", "assets": []})).is_none());
+        let v = serde_json::json!({"tag_name": "v0.5.0", "assets": [{"name": "soundya-armv7.tar",
+            "browser_download_url": "https://x/a", "size": 3, "digest": "sha256:ABC"}]});
+        assert_eq!(release_from(&v).unwrap().digest, "sha256:ABC");
+    }
+
+    #[test]
+    fn checks_the_digest() {
+        let p = std::env::temp_dir().join(format!("soundya-digest-{}", std::process::id()));
+        std::fs::write(&p, b"abc").unwrap();
+        let p = p.to_str().unwrap();
+        // sha256("abc")
+        let good = "sha256:BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD";
+        if Command::new("sha256sum").arg(p).output().is_ok_and(|o| o.status.success()) {
+            assert!(verify_digest(p, good).is_ok());
+            assert!(verify_digest(p, "sha256:00").unwrap_err().contains("повреждён"));
+        }
+        assert!(verify_digest(p, "").is_ok(), "no digest: size check only");
+        let _ = std::fs::remove_file(p);
+    }
+
+    #[test]
+    fn reads_the_installers_result() {
+        let d = std::env::temp_dir().join(format!("soundya-upd-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&d);
+        assert!(last_result(&d).is_null());
+        std::fs::write(d.join("update-result"), "status=rolledback\nfrom=0.4.40\nto=0.5.0\ntime=1700000000\nreason=не запустилась за 90 с\njunk\n").unwrap();
+        let r = last_result(&d);
+        assert_eq!(r["status"], "rolledback");
+        assert_eq!(r["from"], "0.4.40");
+        assert_eq!(r["time"], 1_700_000_000u64);
+        assert_eq!(r["reason"], "не запустилась за 90 с");
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

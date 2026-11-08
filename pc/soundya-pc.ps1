@@ -3,13 +3,17 @@
 #
 # Protocol: POST http://<pc>:8766/<action> with header "X-Soundya-Key: <key>",
 # body = program name (UTF-8) for open/close, the whole phrase for do. Actions:
-# ping, open, close, do, sleep, shutdown, restart, lock. The answer is a short Russian sentence that Alice says.
+# ping, open, close, do, sleep, shutdown, restart, lock, metrics (JSON), process <name>.
+# The answer is a short Russian sentence that Alice says. Since 0.5.00 the request
+# is signed (X-Soundya-Time, X-Soundya-Nonce, X-Soundya-Sign) instead of carrying the key.
 #
 # Settings: %LOCALAPPDATA%\soundya-pc\config.json (created by install.ps1):
 #   { "port": 8766, "key": "...", "apps": { "моя игра": "C:\\Games\\game.exe" },
 #     "sites": { "работа": "https://jira.example.com" },
 #     "contacts": { "мама|маме|маму": "@username", "саша|саше": "+79991234567" },
-#     "telegram_send": true, "vpn": "AmneziaVPN" }
+#     "telegram_send": true, "vpn": "AmneziaVPN",
+#     "duck": true, "speaker": "192.168.0.112", "speaker_port": 8765 }
+# "duck": tell the speaker about calls (an app using the microphone) for Smart Ducking.
 # "apps" adds your own names: spoken name -> program name, shortcut or .exe path.
 
 $ErrorActionPreference = 'Stop'
@@ -639,12 +643,132 @@ function Later([scriptblock]$action) {
     Start-Job -ScriptBlock $action | Out-Null
 }
 
+# Since soundya 0.5.00 the speaker signs every command (HMAC-SHA256 of
+# «time\nnonce\npath\nbody» with the key) instead of sending the key itself.
+# A request older than 2 minutes or seen before is refused. Speakers before
+# 0.5.00 send the key in X-Soundya-Key: still accepted unless
+# "allow_plain_key": false in config.json.
+$Seen = New-Object System.Collections.Generic.Queue[string]
+function Test-Auth($req) {
+    $sign = $req.Headers['x-soundya-sign']
+    if ($sign) {
+        $ts = $req.Headers['x-soundya-time']; $nonce = $req.Headers['x-soundya-nonce']
+        $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        if (-not $ts -or -not $nonce -or [Math]::Abs($now - [long]$ts) -gt 120) { return $false }
+        if ($Seen.Contains("$ts/$nonce")) { return $false }
+        $head = [Text.Encoding]::UTF8.GetBytes("$ts`n$nonce`n$($req.Path)`n")
+        $raw = [byte[]]$req.Raw
+        if ($null -eq $raw) { $raw = [byte[]]@() }
+        $msg = New-Object byte[] ($head.Length + $raw.Length)
+        [Array]::Copy($head, $msg, $head.Length)
+        if ($raw.Length) { [Array]::Copy($raw, 0, $msg, $head.Length, $raw.Length) }
+        $h = New-Object System.Security.Cryptography.HMACSHA256 (,[Text.Encoding]::UTF8.GetBytes($Key))
+        $want = -join ($h.ComputeHash($msg) | ForEach-Object { $_.ToString('x2') })
+        if ($want -ne $sign.ToLower()) { return $false }
+        $Seen.Enqueue("$ts/$nonce"); while ($Seen.Count -gt 500) { [void]$Seen.Dequeue() }
+        return $true
+    }
+    return ($Config.allow_plain_key -ne $false) -and ($req.Headers['x-soundya-key'] -eq $Key)
+}
+
+# CPU/GPU load and temperature, RAM, uptime: what Windows gives. Temperatures
+# need either the ACPI sensor (not on every board), nvidia-smi (NVIDIA cards)
+# or LibreHardwareMonitor / OpenHardwareMonitor running (their WMI sensors).
+function Get-Metrics {
+    $m = [ordered]@{}
+    try { $m.cpu = [int](Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average } catch {}
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem
+        $m.ram_total_gb = [math]::Round($os.TotalVisibleMemorySize / 1MB, 1)
+        $m.ram_used = [int](100 - $os.FreePhysicalMemory * 100 / $os.TotalVisibleMemorySize)
+        $m.uptime_h = [int]((Get-Date) - $os.LastBootUpTime).TotalHours
+    } catch {}
+    try {
+        $g = (Get-Counter '\GPU Engine(*engtype_3D)\Utilization Percentage' -ErrorAction Stop).CounterSamples | Measure-Object CookedValue -Sum
+        $m.gpu = [int][math]::Min(100, $g.Sum)
+    } catch {}
+    $smi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+    if ($smi) {
+        try {
+            $p = ((& $smi.Source --query-gpu=temperature.gpu,utilization.gpu --format=csv,noheader,nounits) | Select-Object -First 1) -split ','
+            $m.gpu_temp = [int]$p[0]; $m.gpu = [int]$p[1]
+        } catch {}
+    }
+    try {
+        $t = Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction Stop | Select-Object -First 1
+        if ($t -and $t.CurrentTemperature -gt 2732) { $m.cpu_temp = [int]($t.CurrentTemperature / 10 - 273.15) }
+    } catch {}
+    foreach ($ns in 'root/LibreHardwareMonitor', 'root/OpenHardwareMonitor') {
+        try {
+            $s = Get-CimInstance -Namespace $ns -ClassName Sensor -ErrorAction Stop | Where-Object { $_.SensorType -eq 'Temperature' }
+            $c = $s | Where-Object { $_.Name -match 'CPU Package|Tctl|CPU Total|Core Average' } | Select-Object -First 1
+            if ($c) { $m.cpu_temp = [int]$c.Value }
+            $gg = $s | Where-Object { $_.Name -match 'GPU Core' } | Select-Object -First 1
+            if ($gg -and -not $m.gpu_temp) { $m.gpu_temp = [int]$gg.Value }
+            break
+        } catch {}
+    }
+    $m | ConvertTo-Json -Compress
+}
+
+# «Запущен ли стим на компьютере»: by the same names as «закрой стим».
+function Test-Running([string]$name) {
+    $app = Find-App $name
+    $names = if ($app) { @(Process-Names $app) } else { @($name) }
+    $running = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $names -contains $_.ProcessName })
+    if ($running.Count) { "Да, $name запущен" } else { "Нет, $name сейчас не запущен" }
+}
+
+# Scenarios: a mouse click at screen pixels and a key / shortcut (the speaker checked them; checked again here).
+$MouseCode = @'
+using System; using System.Runtime.InteropServices;
+public static class SoundyaMouse {
+    [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] static extern void mouse_event(uint f, uint dx, uint dy, uint d, UIntPtr e);
+    public static void Click(int x, int y, bool right, bool twice) {
+        SetCursorPos(x, y);
+        uint down = right ? 0x0008u : 0x0002u, up = right ? 0x0010u : 0x0004u;
+        for (int i = 0; i < (twice ? 2 : 1); i++) { mouse_event(down, 0, 0, 0, UIntPtr.Zero); mouse_event(up, 0, 0, 0, UIntPtr.Zero); System.Threading.Thread.Sleep(60); }
+    }
+}
+'@
+function Do-Click([string]$spec) {
+    if ($spec -notmatch '^(\d{1,5}),(\d{1,5})(,(double|right))?$') { return 'Не поняла, куда кликнуть' }
+    if (-not ('SoundyaMouse' -as [type])) { Add-Type -TypeDefinition $MouseCode -Language CSharp }
+    [SoundyaMouse]::Click([int]$Matches[1], [int]$Matches[2], $Matches[4] -eq 'right', $Matches[4] -eq 'double')
+    'Готово'
+}
+$KeyNames = @{ enter = '{ENTER}'; esc = '{ESC}'; tab = '{TAB}'; space = ' '; backspace = '{BACKSPACE}'; delete = '{DELETE}';
+    up = '{UP}'; down = '{DOWN}'; left = '{LEFT}'; right = '{RIGHT}'; home = '{HOME}'; end = '{END}'; pageup = '{PGUP}';
+    pagedown = '{PGDN}'; insert = '{INSERT}' }
+function Do-Key([string]$spec) {
+    $parts = $spec.ToLower().Split('+')
+    $key = $parts[-1]
+    $mods = ''
+    foreach ($m in $parts[0..($parts.Count - 2)]) {
+        if ($parts.Count -eq 1) { break }
+        switch ($m) { 'ctrl' { $mods += '^' } 'cmd' { $mods += '^' } 'shift' { $mods += '+' } 'alt' { $mods += '%' } 'option' { $mods += '%' }
+            'win' { return 'Клавишу Windows сценарий нажать не может' } default { return 'Не знаю такой клавиши' } }
+    }
+    if ($KeyNames.ContainsKey($key)) { $k = $KeyNames[$key] }
+    elseif ($key -match '^f([1-9]|1[0-2])$') { $k = '{F' + $Matches[1] + '}' }
+    elseif ($key -match '^[a-z0-9]$') { $k = $key }
+    elseif ($key -match '^[-=\[\];'',./`]$') { $k = '{' + $key + '}' }
+    else { return 'Не знаю такой клавиши' }
+    (New-Object -ComObject WScript.Shell).SendKeys($mods + $k)
+    'Готово'
+}
+
 function Handle([string]$action, [string]$body) {
     switch ($action) {
         'ping' { "Компьютер $env:COMPUTERNAME на связи" }
+        'metrics' { Get-Metrics }
+        'process' { Test-Running $body }
         'open' { Do-Open $body }
         'close' { Do-Close $body }
         'do' { Do-Command $body }
+        'click' { Do-Click $body }
+        'key' { Do-Key $body }
         'lock' { Start-Process rundll32.exe 'user32.dll,LockWorkStation'; 'Заблокировала компьютер' }
         'sleep' {
             Later { Start-Sleep -Seconds 2; Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Application]::SetSuspendState('Suspend', $false, $false) | Out-Null }
@@ -684,13 +808,20 @@ function Read-Request($stream) {
     [pscustomobject]@{
         Method = $parts[0]; Path = $parts[1]; Headers = $headers
         Body = [Text.Encoding]::UTF8.GetString($buf, 0, $got)
+        # Always a byte[]: with no body the old expression gave $null, and @($null).Count
+        # is 1, so a stray zero byte went into the signed message and every command
+        # without a body (ping, sleep, lock, metrics) was refused as a wrong key.
+        Raw = $(if ($got -gt 0) { [byte[]]$buf[0..($got - 1)] } else { [byte[]]@() })
     }
 }
 
 function Send-Answer($stream, [int]$code, [string]$text) {
     $reason = @{ 200 = 'OK'; 403 = 'Forbidden'; 404 = 'Not Found'; 400 = 'Bad Request' }[$code]
     $body = [Text.Encoding]::UTF8.GetBytes($text)
-    $head = "HTTP/1.1 $code $reason`r`nContent-Type: text/plain; charset=utf-8`r`nContent-Length: $($body.Length)`r`nConnection: close`r`n`r`n"
+    # A refusal says that this soundya-pc checks signatures, so the speaker never
+    # retries with the key in the clear (it does that only for soundya-pc before 0.5.00).
+    $auth = if ($code -eq 403) { "X-Soundya-Auth: hmac`r`n" } else { '' }
+    $head = "HTTP/1.1 $code $reason`r`n$($auth)Content-Type: text/plain; charset=utf-8`r`nContent-Length: $($body.Length)`r`nConnection: close`r`n`r`n"
     $h = [Text.Encoding]::ASCII.GetBytes($head)
     $stream.Write($h, 0, $h.Length)
     $stream.Write($body, 0, $body.Length)
@@ -710,6 +841,60 @@ function Save-Status {
 }
 Save-Status
 
+# Smart Ducking (soundya 0.5.00): tell the speaker when an app starts or stops
+# using the microphone — a call in Telegram, Zoom, Discord, Teams… — so it can
+# turn its music down. Windows itself keeps this in the registry (the same data
+# as the microphone icon in the taskbar); nothing is listened to or recorded,
+# and a video in the browser (no microphone) is not a call. Off: "duck": false.
+if ($Config.duck -ne $false) {
+    $DuckScript = {
+        param($Dir, $Speaker, $SpeakerPort, $LogFile)
+        $root = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone'
+        function DuckLog($t) { try { Add-Content -Path $LogFile -Value ("{0:yyyy-MM-dd HH:mm:ss} duck: {1}" -f (Get-Date), $t) -Encoding UTF8 } catch {} }
+        function MicApps {
+            $apps = @{}
+            foreach ($base in @("$root\NonPackaged", $root)) {
+                foreach ($k in @(Get-ChildItem $base -ErrorAction SilentlyContinue)) {
+                    if ($k.PSChildName -eq 'NonPackaged') { continue }
+                    $p = Get-ItemProperty $k.PSPath -ErrorAction SilentlyContinue
+                    if ($p -and $p.LastUsedTimeStart -and $p.LastUsedTimeStop -eq 0) {
+                        $name = (($k.PSChildName -split '#')[-1] -replace '\.exe$', '') -replace '_[a-z0-9]{13}$', ''
+                        $apps[$name] = $true
+                    }
+                }
+            }
+            $apps
+        }
+        function Send([string]$state, [string]$app) {
+            $to = $Speaker
+            if (-not $to) { try { $to = (Get-Content (Join-Path $Dir 'status.json') -Raw -Encoding UTF8 | ConvertFrom-Json).speaker } catch {} }
+            if (-not $to) { return $false }
+            $body = @{ source = 'pc'; kind = 'call'; id = "pc:$app"; state = $state; app = $app } | ConvertTo-Json -Compress
+            try {
+                Invoke-RestMethod -Uri "http://${to}:$SpeakerPort/api/duck" -Method Post -TimeoutSec 3 `
+                    -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+                DuckLog "$state $app"
+                return $true
+            } catch { DuckLog "speaker ${to}: $($_.Exception.Message)"; return $false }
+        }
+        $was = @{}
+        while ($true) {
+            try {
+                $now = MicApps
+                foreach ($a in @($now.Keys)) { if (-not $was.ContainsKey($a)) { if (-not (Send 'start' $a)) { $now.Remove($a) } } }
+                foreach ($a in @($was.Keys)) { if (-not $now.ContainsKey($a)) { if (-not (Send 'end' $a)) { $now[$a] = $true } } }
+                $was = $now
+            } catch { DuckLog "error: $_" }
+            Start-Sleep -Seconds 2
+        }
+    }
+    $SpeakerPort = if ($Config.speaker_port) { [int]$Config.speaker_port } else { 8765 }
+    $DuckPs = [powershell]::Create()
+    [void]$DuckPs.AddScript($DuckScript).AddArgument($Dir).AddArgument([string]$Config.speaker).AddArgument($SpeakerPort).AddArgument($LogFile)
+    [void]$DuckPs.BeginInvoke()
+    Log 'ducking: watching the microphone for calls'
+}
+
 $listener = New-Object System.Net.Sockets.TcpListener ([System.Net.IPAddress]::Any), $Port
 try { $listener.Start() } catch { Log "cannot listen on port ${Port}: $_ (already running?)"; exit 1 }
 Log "listening on port $Port"
@@ -722,7 +907,7 @@ while ($true) {
         $stream = $client.GetStream()
         $req = Read-Request $stream
         if (-not $req) { continue }
-        if ($req.Headers['x-soundya-key'] -ne $Key) {
+        if (-not (Test-Auth $req)) {
             Log "wrong key from $($client.Client.RemoteEndPoint)"
             Send-Answer $stream 403 'Неверный ключ'
             continue

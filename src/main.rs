@@ -1,29 +1,46 @@
 //! soundya: SoundCloud for Yandex Station Mini, controlled by Alice's voice.
 
 mod adb;
+mod adbkeep;
 mod airplay;
 mod alice;
 mod alsa;
+mod bt;
+mod auth;
 mod buffer;
 mod buttons;
+mod calendar;
 mod bypass;
 mod clock;
+mod display;
 mod dns;
+mod ducking;
+#[cfg(feature = "dev")]
+mod devpage;
 mod eq;
 mod fsx;
+mod google;
+mod hello;
 mod history;
 mod ipt;
 mod led;
 mod luna;
 mod mdns;
 mod pc;
+mod planner;
+mod probe;
 mod player;
+mod report;
 mod sc;
 mod settings;
+mod sha256;
 mod stats;
+mod telegram;
+mod timer;
 mod tv;
 mod update;
 mod vis;
+mod voice;
 mod volume;
 mod zapret;
 mod web;
@@ -56,6 +73,14 @@ const WRITES_OFF: &str = "Лайки и добавление в плейлист
 // 9895 is taken by the Yandex firmware.
 const CONTROL: &str = "127.0.0.1:47895";
 
+/// The version everywhere (status, reports, /run/soundya.ready, `soundya version`).
+/// The developer build (`--features dev`) is «0.5.0+dev»: install.sh checks the
+/// running program against VERSION, and the page shows the build for what it is.
+#[cfg(not(feature = "dev"))]
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+#[cfg(feature = "dev")]
+pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "+dev");
+
 pub enum Cmd {
     Voice(Intent),
     /// AirPlay sound started (true) or stopped (false).
@@ -68,7 +93,8 @@ pub enum Cmd {
     BypassManual(String),
     Control(String, Sender<String>),
     Ended(u64, Outcome),
-    Settings(Settings, Sender<String>),
+    /// A settings change from the page: only the fields it sends (merged into the current ones).
+    Settings(serde_json::Value, Sender<String>),
     TestProxy(String, Sender<String>),
     /// Search results from a background search, kept for "pick".
     Results(Vec<Track>),
@@ -104,6 +130,8 @@ pub struct Shared {
     pc: AtomicBool,
     /// Telegram contact names as said («лиза», «лизе», «кошка»), for «напиши лизе …».
     contacts: Mutex<Vec<String>>,
+    /// Voice macros as (normalized phrase, script), for matching spoken lines.
+    macros: Mutex<Vec<(String, String)>>,
     active: AtomicBool,
     queue: AtomicBool,
     status: Mutex<String>,
@@ -111,6 +139,8 @@ pub struct Shared {
     pub status_json: Mutex<String>,
     /// The playing track's cover on SoundCloud, for the page's /cover.
     pub cover: Mutex<Option<String>>,
+    /// The track playing now, for the browser audio stream (/api/stream).
+    pub now_track: Mutex<Option<Track>>,
     pub airplay: airplay::AirPlay,
     /// Anonymous statistics switched on (settings page).
     pub stats: AtomicBool,
@@ -130,9 +160,29 @@ pub struct Shared {
     pub soundcloud: AtomicBool,
     /// «Подсветка»: mode, colours, brightness.
     pub light: Mutex<led::Light>,
+    /// «Фразы Алисы для программ на ПК» (setting share_heard).
+    pub share_heard: AtomicBool,
+    /// The last phrase Alice recognised and when (unix s); only while share_heard is on.
+    heard: Mutex<(String, u64)>,
 }
 
 impl Shared {
+    /// Remembers what Alice heard, for /api/status — only if the owner allowed it.
+    pub fn set_heard(&self, text: &str) {
+        if !self.share_heard.load(Ordering::Acquire) {
+            return;
+        }
+        let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        *self.heard.lock().unwrap() = (text.to_owned(), at);
+    }
+    /// `{"text", "at"}` for /api/status, null while sharing is off.
+    pub fn heard_json(&self) -> serde_json::Value {
+        if !self.share_heard.load(Ordering::Acquire) {
+            return serde_json::Value::Null;
+        }
+        let (text, at) = self.heard.lock().unwrap().clone();
+        serde_json::json!({ "text": text, "at": at })
+    }
     pub fn is_active(&self) -> bool {
         self.active.load(Ordering::Acquire)
     }
@@ -159,6 +209,9 @@ impl Shared {
     }
     pub fn contact_names(&self) -> Vec<String> {
         self.contacts.lock().unwrap().clone()
+    }
+    pub fn macros(&self) -> Vec<(String, String)> {
+        self.macros.lock().unwrap().clone()
     }
 }
 
@@ -202,6 +255,13 @@ struct Controller {
     /// What the running fetch was asked for, as the page shows it, and the
     /// command that asks for it again: goes to the history once it plays.
     asked: Option<(String, String)>,
+    /// When a refused SoundCloud token was last asked again (every 10 minutes).
+    token_checked: Option<std::time::Instant>,
+    /// The command that loaded the queue now («play bonobo», «likes»…), for resuming.
+    source_cmd: Option<String>,
+    /// After a restart: (queue position, ms) to start at when the queue is loaded again.
+    resume_at: Option<(usize, u64)>,
+    resume_saved: Option<std::time::Instant>,
 }
 
 fn fmt_ms(ms: u64) -> String {
@@ -222,6 +282,50 @@ fn respond(reply: Option<Sender<String>>, text: &str, speech: Option<String>) {
             }
         }
     }
+}
+
+/// The connection's verdict from the last check of SoundCloud (None: not yet; Some(None): it
+/// failed) and the download speed while music plays (kbit/s, only when fresh). Music downloading
+/// is the better witness: a failed check alone does not make it «нет связи» while it plays.
+fn net_level(ping: Option<Option<u64>>, speed: Option<u64>) -> &'static str {
+    match (ping, speed) {
+        (None, None) => "unknown",
+        (Some(None), None) => "down",
+        (Some(None) | None, Some(s)) => if s >= 600 { "good" } else if s >= 200 { "slow" } else { "bad" },
+        (Some(Some(p)), s) if p <= 500 && s.is_none_or(|s| s >= 600) => "good",
+        (Some(Some(p)), s) if p <= 1200 && s.is_none_or(|s| s >= 200) => "slow",
+        _ => "bad",
+    }
+}
+
+/// Every 10 s while Bluetooth output is on: is the device connected? A change moves the music.
+/// After a restart of the speaker BlueALSA is back to receiving only: made to send again first.
+fn bt_watch(tx: Sender<Cmd>, mac: Option<String>) {
+    bt::set_output(mac);
+    thread::spawn(move || {
+        let mut source_ok = false;
+        loop {
+            thread::sleep(Duration::from_secs(10));
+            let Some(mac) = bt::output() else { continue };
+            if !source_ok {
+                match bt::ensure_source() {
+                    Ok(()) => source_ok = true,
+                    Err(e) => {
+                        eprintln!("bt: {e}");
+                        thread::sleep(Duration::from_secs(50));
+                        continue;
+                    }
+                }
+            }
+            let now = bt::info(&mac).is_some_and(|d| d.connected);
+            if now != bt::connected(&mac) {
+                eprintln!("bt: {mac} {}", if now { "connected" } else { "disconnected" });
+                bt::set_connected(&mac, now);
+                let (rtx, _rrx) = mpsc::channel();
+                let _ = tx.send(Cmd::Control("bt reroute".into(), rtx));
+            }
+        }
+    });
 }
 
 /// Lower case, «ё» → «е», punctuation dropped and numbers as digits: speech
@@ -348,7 +452,9 @@ impl Controller {
             "airplay_name": self.settings.airplay_name,
             "airplay_icon": self.settings.airplay_icon,
             "stats": self.settings.stats,
+            "share_heard": self.settings.share_heard,
             "tv_host": self.settings.tv_host,
+            "macros": self.settings.macros,
             "bypass": self.settings.bypass,
             "bypass_on": self.settings.bypass_on,
             "bypass_manual": self.settings.bypass_manual,
@@ -367,6 +473,80 @@ impl Controller {
             "tv_on": self.settings.tv_on,
         });
         settings["eq_on"] = self.settings.eq_on.into();
+        settings["led_order"] = self.settings.led_order.clone().into();
+        settings["light_speed"] = self.settings.light_speed.into();
+        settings["light_intensity"] = self.settings.light_intensity.into();
+        settings["onboarded"] = self.settings.onboarded.into();
+        settings["pin_on"] = (!self.settings.panel_pin.is_empty()).into();
+        settings["alice_voice"] = self.settings.alice_voice.into();
+        settings["planner_on"] = self.settings.planner_on.into();
+        settings["tg_on"] = self.settings.tg_on.into();
+        settings["autostart"] = serde_json::to_value(&self.settings.autostart).unwrap_or_default();
+        settings["resume_music"] = self.settings.resume_music.into();
+        settings["display_on"] = self.settings.display_on.into();
+        settings["display_widgets"] = self.settings.display_widgets.clone().into();
+        settings["display_secs"] = self.settings.display_secs.into();
+        settings["display_bright"] = self.settings.display_bright.into();
+        settings["display_city"] = self.settings.display_city.clone().into();
+        settings["tg_bots"] = self.settings.tg_bots.iter().map(|b| serde_json::json!({
+            "name": b.name,
+            "token": format!("••••••••{}", b.token.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect::<String>()),
+        })).collect::<Vec<_>>().into();
+        settings["tg_allowed"] = serde_json::to_value(&self.settings.tg_allowed).unwrap_or_default();
+        settings["tg_read"] = self.settings.tg_read.into();
+        settings["tg_max"] = self.settings.tg_max.into();
+        settings["tg_quiet_on"] = self.settings.tg_quiet_on.into();
+        settings["tg_quiet_from"] = self.settings.tg_quiet_from.into();
+        settings["tg_quiet_to"] = self.settings.tg_quiet_to.into();
+        settings["tz_offset"] = self.settings.tz_offset.into();
+        settings["bt_mac"] = self.settings.bt_mac.clone().into();
+        settings["bt_name"] = self.settings.bt_name.clone().into();
+        settings["bt_on"] = self.settings.bt_on.into();
+        settings["cal_on"] = self.settings.cal_on.into();
+        settings["cal_url"] = if self.settings.cal_url.is_empty() { String::new() } else { "•••••••• (секретный адрес сохранён)".into() }.into();
+        settings["cal_remind"] = self.settings.cal_remind.into();
+        settings["plan_warn"] = self.settings.plan_warn.into();
+        settings["plan_due_time"] = self.settings.plan_due_time.into();
+        settings["brief_on"] = self.settings.brief_on.into();
+        settings["brief_phrase"] = self.settings.brief_phrase.into();
+        settings["brief_at"] = self.settings.brief_at.into();
+        settings["brief_days"] = self.settings.brief_days.clone().into();
+        settings["plan_target"] = self.settings.plan_target.clone().into();
+        settings["plan_mode"] = self.settings.plan_mode().into();
+        settings["work_from"] = self.settings.work_from.into();
+        settings["work_to"] = self.settings.work_to.into();
+        settings["work_days"] = self.settings.work_days.clone().into();
+        settings["pomo_work"] = self.settings.pomo_work.into();
+        settings["pomo_break"] = self.settings.pomo_break.into();
+        settings["pomo_long"] = self.settings.pomo_long.into();
+        settings["pomo_rounds"] = self.settings.pomo_rounds.into();
+        settings["timer_face"] = self.settings.timer_face.into();
+        settings["adb_keep"] = self.settings.adb_keep.into();
+        settings["remote_tab"] = self.settings.remote_tab.into();
+        settings["home_hidden"] = self.settings.home_hidden.clone().into();
+        settings["home_order"] = self.settings.home_order.clone().into();
+        settings["pomo_on_work"] = self.settings.pomo_on_work.clone().into();
+        settings["teams"] = serde_json::to_value(&self.settings.teams).unwrap_or_default();
+        settings["meet_minutes"] = self.settings.meet_minutes.into();
+        settings["meet_bot_token"] = mask_tail(&self.settings.meet_bot_token).into();
+        settings["pomo_on_break"] = self.settings.pomo_on_break.clone().into();
+        settings["pomo_on_done"] = self.settings.pomo_on_done.clone().into();
+        settings["g_on"] = self.settings.g_on.into();
+        settings["g_client_id"] = self.settings.g_client_id.clone().into();
+        settings["g_client_secret"] = if self.settings.g_client_secret.is_empty() { String::new() } else { "••••••••".into() }.into();
+        settings["g_connected"] = (!self.settings.g_refresh.is_empty()).into();
+        settings["g_read"] = self.settings.g_read.clone().into();
+        settings["g_write"] = self.settings.g_write.clone().into();
+        settings["g_list"] = self.settings.g_list.clone().into();
+        settings["alice_voice_max"] = self.settings.alice_voice_max.into();
+        settings["duck_mode"] = self.settings.duck_mode.clone().into();
+        settings["duck_call_level"] = self.settings.duck_call_level.into();
+        settings["duck_notify_level"] = self.settings.duck_notify_level.into();
+        settings["duck_notify_secs"] = self.settings.duck_notify_secs.into();
+        settings["duck_exclude"] = self.settings.duck_exclude.clone().into();
+        settings["voice_hello"] = self.settings.voice_hello.into();
+        settings["report_logs"] = self.settings.report_logs.into();
+        settings["music_default"] = self.settings.music_default.clone().into();
         settings["eq"] = self.settings.eq.clone().into();
         let mut out = serde_json::json!({
             "state": state,
@@ -386,15 +566,41 @@ impl Controller {
             "repeat": self.repeat,
             "settings": settings,
             "user": self.user,
+            // none | ok | checking (saved, not confirmed yet) | refused (sign in again)
+            "login": login_state(self.client.has_token(), self.client.token_refused(), self.user.is_some()),
             "loading": self.loading.lock().unwrap().clone(),
             "airplay": self.shared.airplay.json(),
             "update": self.shared.updates.json(),
             "bypass_log": *self.shared.bypass_log.lock().unwrap(),
             "bypass_busy": self.shared.bypass_busy.load(Ordering::Acquire),
             "volume": volume::level(),
+            "led": led::info(),
+            "device": device_info(),
+            "pc_legacy": pc::LEGACY.load(Ordering::Acquire),
+            "ducking": ducking::json(),
+            "voice": voice::json(),
+            "telegram": telegram::json(),
+            "display": display::json(),
+            "timer": timer::json(),
+            // The Mac/Windows app may send updates here (web.rs /api/update/upload), confirmed by «Алиса, да».
+            "net_update": true,
+            "calendar": calendar::json(),
+            "listen": serde_json::json!({
+                "listeners": web::listeners(),
+                "muted": self.shared.duck.listening(),
+                "gen": web::LISTEN_GEN.load(Ordering::Acquire),
+                // MP3/AAC start in the browser where the speaker is; MP4 from the beginning.
+                "seekable": current.is_some_and(Track::stream_seekable),
+            }),
+            "onboarding": serde_json::json!({
+                "stage": format!("{:?}", hello::stage()),
+                "phase": led::install_phase().map(|p| format!("{p:?}")),
+            }),
+            "source": alice::source_of(&self.shared),
             "zapret_presets": zapret::PRESETS.iter().enumerate().map(|(i, (name, _))| { let id = zapret::id_of(i); let e = zapret::engine(&id, "").to_string(); [id, (*name).to_owned(), e] }).collect::<Vec<_>>(),
         });
         // Through the speaker: the phone may not reach sndcdn.com itself.
+        out["heard"] = self.shared.heard_json();
         out["cover"] = current.filter(|t| t.cover().is_some()).map(|t| format!("/cover?{}", t.id)).into();
         out.to_string()
     }
@@ -434,13 +640,7 @@ impl Controller {
         };
         let ping = self.net.as_ref().and_then(|r| r.as_ref().ok().copied());
         let error = self.net.as_ref().and_then(|r| r.as_ref().err().cloned());
-        let level = match (&self.net, speed_kbps) {
-            (None, _) => "unknown",
-            (Some(Err(_)), _) => "down",
-            (Some(Ok(p)), s) if *p <= 500 && s.is_none_or(|s| s >= 600) => "good",
-            (Some(Ok(p)), s) if *p <= 1200 && s.is_none_or(|s| s >= 200) => "slow",
-            _ => "bad",
-        };
+        let level = net_level(self.net.as_ref().map(|r| r.as_ref().ok().copied()), speed_kbps);
         let warning = match level {
             "slow" => Some(
                 "Соединение медленное: треки будут дольше загружаться, а команды SoundCloud — дольше выполняться. \
@@ -454,6 +654,11 @@ impl Controller {
             ),
             "down" => Some(format!(
                 "Нет связи с SoundCloud ({}). Проверьте прокси в настройках ниже.",
+                error.clone().unwrap_or_default()
+            )),
+            // Music comes, but the last check of SoundCloud's API failed: search and likes may be slow.
+            _ if error.is_some() => Some(format!(
+                "Музыка загружается, но последняя проверка SoundCloud не прошла ({}): поиск и лайки могут отвечать медленно.",
                 error.clone().unwrap_or_default()
             )),
             _ => None,
@@ -482,6 +687,10 @@ impl Controller {
         let client = self.client.clone();
         let tx = self.tx.clone();
         thread::spawn(move || {
+            // A token marked «refused» is asked again first: it may be fine.
+            if client.token_refused() {
+                client.verify_token();
+            }
             let user = if client.has_token() {
                 match client.me() {
                     Ok((_, name)) => {
@@ -528,7 +737,7 @@ impl Controller {
     }
 
     fn apply_settings(&mut self, mut new: Settings) -> String {
-        if !["solid", "pulse", "eq"].contains(&new.light_mode.as_str()) {
+        if !led::MODES.contains(&new.light_mode.as_str()) {
             new.light_mode = "solid".into();
         }
         for c in [&mut new.light_color, &mut new.light_color2, &mut new.light_bass, &mut new.light_mid, &mut new.light_high] {
@@ -538,11 +747,136 @@ impl Controller {
             *c = c.trim().to_lowercase();
         }
         new.light_bright = new.light_bright.clamp(10, 100);
-        if new.token.contains('•') && new.token == self.settings.masked_token() {
+        new.light_speed = new.light_speed.clamp(25, 300);
+        new.light_intensity = new.light_intensity.clamp(30, 200);
+        new.sync_music(&self.settings);
+        // Only «pin set/off» changes the PIN, never the settings form.
+        new.panel_pin = self.settings.panel_pin.clone();
+        if !["smart", "calls", "notify", "manual", "off"].contains(&new.duck_mode.as_str()) {
+            return "error: режим приглушения — smart, calls, notify, manual или off".into();
+        }
+        new.duck_call_level = new.duck_call_level.min(100);
+        new.duck_notify_level = new.duck_notify_level.min(100);
+        new.duck_notify_secs = new.duck_notify_secs.clamp(1, 120);
+        new.duck_exclude = new.duck_exclude.iter().map(|a| a.trim().to_owned()).filter(|a| !a.is_empty()).take(30).collect();
+        ducking::configure(ducking::Config::from_settings(&new));
+        hello::set_voice(new.voice_hello);
+        new.alice_voice = new.alice_voice.clamp(10, 100);
+        new.alice_voice_max = new.alice_voice_max.min(10);
+        voice::configure(new.alice_voice, new.alice_voice_max);
+        new.tz_offset = new.tz_offset.clamp(-720, 840);
+        // Bot tokens come back masked from the page: masked = unchanged.
+        for (i, b) in new.tg_bots.iter_mut().enumerate() {
+            b.name = b.name.trim().to_owned();
+            b.token = b.token.trim().to_owned();
+            if b.token.contains('•') {
+                if let Some(old) = self.settings.tg_bots.get(i) {
+                    b.token = old.token.clone();
+                }
+            }
+        }
+        new.tg_bots.retain(|b| !b.token.is_empty() && !b.token.contains('•'));
+        new.tg_allowed.retain(|a| a.id != 0);
+        for a in &new.tg_allowed {
+            telegram::forget_unknown(a.id);
+        }
+        telegram::configure(telegram::Config::from_settings(&new), &self.shared);
+        new.display_widgets.retain(|w| ["clock", "pc", "weather"].contains(&w.as_str()));
+        new.display_widgets.dedup();
+        new.display_secs = new.display_secs.clamp(3, 120);
+        new.display_bright = new.display_bright.clamp(10, 100);
+        display::configure(display_widgets(&new), new.display_bright, &new);
+        new.autostart.retain(|a| !a.phrase.trim().is_empty());
+        new.autostart.truncate(10);
+        for a in &mut new.autostart {
+            a.delay = a.delay.min(600);
+            if a.when != "boot" {
+                a.when = "always".into();
+            }
+        }
+        planner::configure(new.planner_on, new.tz_offset);
+        // The secret address comes back masked from the page: masked = unchanged.
+        new.cal_url = new.cal_url.trim().to_owned();
+        if new.cal_url.contains('•') {
+            new.cal_url = self.settings.cal_url.clone();
+        }
+        if !new.cal_url.is_empty() && !calendar::valid_url(&new.cal_url) {
+            return "error: нужен адрес вида https://calendar.google.com/calendar/ical/…/basic.ics".into();
+        }
+        new.cal_remind = new.cal_remind.min(180);
+        calendar::configure(new.cal_on, &new.cal_url, new.cal_remind);
+        // Google: the secret comes back masked; the refresh token only from «google code/off».
+        new.g_client_id = new.g_client_id.trim().to_owned();
+        new.g_client_secret = new.g_client_secret.trim().to_owned();
+        if new.g_client_secret.contains('•') {
+            new.g_client_secret = self.settings.g_client_secret.clone();
+        }
+        if new.g_client_id != self.settings.g_client_id || new.g_client_secret != self.settings.g_client_secret {
+            // Another client: the old sign-in is of no use to it.
+            if !self.settings.g_client_id.is_empty() && new.g_refresh == self.settings.g_refresh {
+                new.g_refresh.clear();
+            }
+        }
+        if !new.g_client_id.is_empty() && !new.g_client_id.ends_with(".apps.googleusercontent.com") {
+            return "error: ID клиента Google заканчивается на .apps.googleusercontent.com".into();
+        }
+        new.plan_warn = new.plan_warn.min(240);
+        new.plan_due_time = new.plan_due_time.min(1440);
+        new.brief_at = new.brief_at.min(1439);
+        if new.brief_days != "weekdays" {
+            new.brief_days = "all".into();
+        }
+        if new.plan_target != "local" && new.plan_target != "work" {
+            new.plan_target = "google".into();
+        }
+        new.plan_mode = new.plan_mode().into();
+        new.home_hidden.retain(|w| settings::HOME_WIDGETS.contains(&w.as_str()));
+        new.home_order.retain(|w| settings::HOME_WIDGETS.contains(&w.as_str()));
+        // Not only neighbours: «a, b, a» kept the second «a» (a widget shown twice).
+        let mut seen = std::collections::HashSet::new();
+        new.home_order.retain(|w| seen.insert(w.clone()));
+        alice::set_tv(new.tv_on && !new.tv_host.trim().is_empty());
+        new.meet_minutes = new.meet_minutes.clamp(5, 480);
+        // 0 would ask «сделали?» again every 10 s after «нет».
+        new.plan_check_every = new.plan_check_every.clamp(1, 24 * 60);
+        new.plan_check_times = new.plan_check_times.max(1);
+        // Comes back masked from the page: masked = unchanged.
+        new.meet_bot_token = new.meet_bot_token.trim().to_owned();
+        if new.meet_bot_token.contains('•') {
+            new.meet_bot_token = self.settings.meet_bot_token.clone();
+        } else if !new.meet_bot_token.is_empty() && !valid_bot_token(&new.meet_bot_token) {
+            return "error: токен бота вида 123456789:AA… (его даёт @BotFather)".into();
+        }
+        for t in &mut new.teams {
+            t.name = t.name.trim().chars().take(40).collect();
+            t.emails = t.emails.iter().map(|e| e.trim().to_lowercase()).filter(|e| !e.is_empty()).collect();
+            if let Some(bad) = t.emails.iter().find(|e| !valid_email(e)) {
+                return format!("error: «{bad}» — не адрес почты");
+            }
+            let mut seen = std::collections::HashSet::new();
+            t.emails.retain(|e| seen.insert(e.clone()));
+            t.emails.truncate(100);
+        }
+        new.teams.truncate(20);
+        new.work_from = new.work_from.min(1439);
+        new.work_to = new.work_to.clamp(new.work_from + 1, 1440);
+        if new.work_days != "all" {
+            new.work_days = "weekdays".into();
+        }
+        let p = new.pomo();
+        (new.pomo_work, new.pomo_break, new.pomo_long, new.pomo_rounds) = (p.work, p.brk, p.long, p.rounds);
+        apply_planner(&new);
+        new.led_order = new.led_order.trim().to_lowercase();
+        if !led::set_order(&new.led_order) {
+            return "error: порядок цветов — rgb, grb, brg, bgr, rbg или gbr".into();
+        }
+        // A masked value is «unchanged», also when it is an older mask (the key was replaced
+        // meanwhile, e.g. by the installer): saving any other setting failed with «ключ компьютера…».
+        if new.token.contains('•') {
             new.token = self.settings.token.clone();
         }
         new.token = new.token.trim().to_owned();
-        if new.pc_token.contains('•') && new.pc_token == self.settings.masked_pc_token() {
+        if new.pc_token.contains('•') {
             new.pc_token = self.settings.pc_token.clone();
         }
         new.pc_host = new.pc_host.trim().to_owned();
@@ -574,6 +908,9 @@ impl Controller {
             .collect();
         self.shared.pc.store(new.pc_configured(), Ordering::Release);
         *self.shared.contacts.lock().unwrap() = contact_names(&new);
+        // Macros are managed by the «macro» command, not this form: keep them.
+        new.macros = self.settings.macros.clone();
+        *self.shared.macros.lock().unwrap() = macro_list(&new);
         let token_changed = new.token != self.settings.token;
         new.proxy = self.real_proxy(&new.proxy);
         // Set only by «bypass auto/off», not by the settings form.
@@ -599,11 +936,17 @@ impl Controller {
         new.airplay_name = new.airplay_name.trim().to_owned();
         self.shared.airplay.configure(new.airplay, &new.airplay_name, &new.airplay_icon);
         self.shared.stats.store(new.stats, Ordering::Release);
+        self.shared.share_heard.store(new.share_heard, Ordering::Release);
+        if !new.share_heard {
+            *self.shared.heard.lock().unwrap() = (String::new(), 0);
+        }
         *self.shared.proxy.lock().unwrap() = new.use_proxy().to_owned();
         new.tv_host = new.tv_host.trim().to_owned();
         self.shared.tv.store(new.tv_configured(), Ordering::Release);
         self.shared.soundcloud.store(new.soundcloud, Ordering::Release);
         let proxy_changed = new.use_proxy() != self.settings.use_proxy();
+        // Only a save that passed all checks switches ADB (turning it off touches the device).
+        adbkeep::configure(new.adb_keep);
         self.settings = new;
         let mut msg = match self.settings.save(&self.dir) {
             Ok(()) => "OK: сохранено".to_owned(),
@@ -676,9 +1019,18 @@ impl Controller {
                 self.queue = tracks;
                 self.failures = 0;
                 if let Some((name, cmd)) = self.asked.take() {
+                    self.source_cmd = Some(cmd.clone());
                     self.history.set(name, cmd);
                 }
-                self.start(0);
+                match self.resume_at.take() {
+                    // After a restart: where it was.
+                    Some((pos, ms)) if pos < self.queue.len() => {
+                        eprintln!("resume: track {} at {}", pos + 1, fmt_ms(ms));
+                        self.retries = 0;
+                        self.start_at(pos, ms.saturating_sub(2_000), 0);
+                    }
+                    _ => self.start(0),
+                }
                 pause_native_again(&self.shared);
                 respond(reply, &format!("OK {}", self.status()), None);
             }
@@ -704,7 +1056,128 @@ impl Controller {
     /// The sound card refused the sound. Not the network, so retrying the track
     /// does not help; a fresh start of soundya does (seen on a Station Mini 1
     /// right after install: «Operation not supported», error 95).
+    /// Where the music plays: the Bluetooth device when it is on and connected, else the speaker.
+    fn out_device(&self) -> String {
+        let s = &self.settings;
+        if s.bt_on && bt::valid_mac(&s.bt_mac) && bt::connected(&s.bt_mac) {
+            bt::pcm_name(&s.bt_mac)
+        } else {
+            self.device.clone()
+        }
+    }
+
+    /// The music playing now moves to where it should play (Bluetooth on/off, connected/lost).
+    fn reroute(&mut self) {
+        if let Some(f) = self.flags.as_ref().filter(|f| !f.paused.load(Ordering::Acquire)) {
+            let ms = f.position_ms.load(Ordering::Acquire);
+            let p = self.pos;
+            self.start_at(p, ms.saturating_sub(500), 0);
+        }
+    }
+
+    fn bt_save(&mut self) -> String {
+        bt::set_output(self.settings.bt_on.then(|| self.settings.bt_mac.clone()));
+        let r = match self.settings.save(&self.dir) {
+            Ok(()) => String::new(),
+            Err(e) => format!(" (настройки не сохранились: {e})"),
+        };
+        self.reroute();
+        self.publish();
+        self.share_status();
+        r
+    }
+
+    fn bt_cmd(&mut self, arg: &str, reply: Sender<String>) {
+        let (what, rest) = arg.split_once(' ').unwrap_or((arg, ""));
+        let rest = rest.trim().to_owned();
+        match what {
+            "" | "status" => send_to(&reply, bt::status_json(&self.settings.bt_mac, self.settings.bt_on).to_string()),
+            "scan" => {
+                thread::spawn(move || {
+                    let r = match bt::scan(10) {
+                        Ok(list) => serde_json::json!({ "devices": list }),
+                        Err(e) => serde_json::json!({ "error": e }),
+                    };
+                    send_to(&reply, r.to_string());
+                });
+            }
+            "connect" => {
+                let tx = self.tx.clone();
+                thread::spawn(move || match bt::connect(&rest) {
+                    Ok(d) => {
+                        bt::set_connected(&d.mac, true);
+                        let name = if d.name.is_empty() { d.mac.clone() } else { d.name.clone() };
+                        let _ = tx.send(Cmd::Control(format!("bt chosen {} {name}", d.mac), reply));
+                    }
+                    Err(e) => send_to(&reply, format!("error: {e}")),
+                });
+            }
+            // From «connect»: this device is the output from now on.
+            "chosen" => {
+                let (mac, name) = rest.split_once(' ').unwrap_or((rest.as_str(), ""));
+                if !bt::valid_mac(mac) {
+                    return send_to(&reply, "error: неверный адрес".into());
+                }
+                self.settings.bt_mac = mac.to_ascii_uppercase();
+                self.settings.bt_name = name.chars().take(60).collect();
+                self.settings.bt_on = true;
+                let note = self.bt_save();
+                send_to(&reply, format!("OK: музыка soundya теперь в «{}»{note}", if name.is_empty() { mac } else { name }));
+            }
+            "on" => {
+                if !bt::valid_mac(&self.settings.bt_mac) {
+                    return send_to(&reply, "error: сначала подключите устройство".into());
+                }
+                self.settings.bt_on = true;
+                let note = self.bt_save();
+                let connected = bt::connected(&self.settings.bt_mac);
+                send_to(&reply, if connected { format!("OK: музыка в «{}»{note}", self.settings.bt_name) }
+                    else { format!("OK: музыка пойдёт в «{}», как только оно подключится{note}", self.settings.bt_name) });
+            }
+            "off" => {
+                self.settings.bt_on = false;
+                let note = self.bt_save();
+                send_to(&reply, format!("OK: музыка снова на колонке{note}"));
+            }
+            "disconnect" | "forget" => {
+                let mac = if rest.is_empty() { self.settings.bt_mac.clone() } else { rest.to_ascii_uppercase() };
+                if !bt::valid_mac(&mac) {
+                    return send_to(&reply, "error: нет такого устройства".into());
+                }
+                bt::set_connected(&mac, false);
+                let forget = what == "forget";
+                if mac == self.settings.bt_mac {
+                    self.settings.bt_on = false;
+                    if forget {
+                        self.settings.bt_mac.clear();
+                        self.settings.bt_name.clear();
+                    }
+                    self.bt_save();
+                }
+                thread::spawn(move || {
+                    let r = if forget { bt::forget(&mac) } else { bt::disconnect(&mac) };
+                    send_to(&reply, r.map_or_else(|e| format!("error: {e}"), |()| if forget { "OK: устройство забыто".into() } else { "OK: отключено, музыка на колонке".into() }));
+                });
+            }
+            // From the watcher: the device came or went.
+            "reroute" => {
+                self.reroute();
+                self.publish();
+                send_to(&reply, "OK".into());
+            }
+            _ => send_to(&reply, "usage: bt status | scan | connect MAC | on | off | disconnect [MAC] | forget MAC".into()),
+        }
+    }
+
     fn audio_failed(&mut self, e: &str, position: u64) {
+        // Headphones gone mid-track: on the speaker from where it stopped, not a failure.
+        if self.settings.bt_on && bt::connected(&self.settings.bt_mac) {
+            eprintln!("bt: {} lost ({e}); back to the speaker", self.settings.bt_mac);
+            bt::set_connected(&self.settings.bt_mac, false);
+            let p = self.pos;
+            self.start_at(p, position.saturating_sub(2_000), 300);
+            return;
+        }
         self.audio_failures += 1;
         eprintln!("audio output failed ({} in a row): {e}", self.audio_failures);
         note_audio_error(&self.dir, &self.device, e);
@@ -735,7 +1208,77 @@ impl Controller {
         self.publish();
     }
 
+    /// What plays now, for «продолжить музыку после перезагрузки»: every 15 s while
+    /// it plays; a pause or a stop by the user is saved too (then nothing resumes).
+    fn save_resume(&mut self) {
+        // While a resume is still loading (resume_saved is set 2 minutes ahead),
+        // the old file stays as it was; a load that never came is forgotten.
+        if !self.settings.resume_music || self.resume_saved.is_some_and(|t| t.elapsed() < Duration::from_secs(15)) {
+            return;
+        }
+        self.resume_at = None;
+        self.resume_saved = Some(std::time::Instant::now());
+        let playing = self.flags.as_ref().is_some_and(|f| !f.paused.load(Ordering::Acquire));
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let v = serde_json::json!({
+            "playing": playing && self.source_cmd.is_some(),
+            "cmd": self.source_cmd,
+            "pos": self.pos,
+            "track": self.current().map(|t| t.id),
+            "ms": self.flags.as_ref().map_or(0, |f| f.position_ms.load(Ordering::Acquire)),
+            "at": now,
+        });
+        let _ = settings::write_synced(&self.dir.join("resume.json"), v.to_string().as_bytes());
+    }
+
+    /// At start: music that was playing under 20 minutes ago goes on.
+    fn resume_after_restart(&mut self) {
+        if !self.settings.resume_music {
+            return;
+        }
+        let Some(v) = fsx::read_string(&self.dir.join("resume.json")).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { return };
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let fresh = now.saturating_sub(v["at"].as_u64().unwrap_or(0)) < 20 * 60;
+        let (Some(cmd), true, true) = (v["cmd"].as_str(), v["playing"].as_bool().unwrap_or(false), fresh) else { return };
+        eprintln!("resume: «{cmd}» was playing before the restart; going on");
+        self.resume_at = Some((v["pos"].as_u64().unwrap_or(0) as usize, v["ms"].as_u64().unwrap_or(0)));
+        self.resume_saved = Some(std::time::Instant::now() + Duration::from_secs(120));
+        let (tx, _rx) = mpsc::channel();
+        self.control(cmd, tx);
+    }
+
+    /// Autostart scenarios, in order, each after its delay; «boot» ones only
+    /// when the speaker itself was just switched on.
+    fn autostart(&self) {
+        let boot = fsx::read_string(std::path::Path::new("/proc/uptime"))
+            .and_then(|u| u.split('.').next().and_then(|s| s.parse::<u64>().ok()))
+            .is_some_and(|up| up < 600);
+        let list: Vec<settings::Autostart> =
+            self.settings.autostart.iter().filter(|a| !a.phrase.trim().is_empty() && (a.when != "boot" || boot)).cloned().collect();
+        if list.is_empty() {
+            return;
+        }
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            // Let the network and Alice come up first.
+            thread::sleep(Duration::from_secs(20));
+            for a in list {
+                thread::sleep(Duration::from_secs(u64::from(a.delay.min(600))));
+                eprintln!("autostart: «{}»", a.phrase);
+                let (rtx, rrx) = mpsc::channel();
+                if tx.send(Cmd::Control(format!("macro run {}", a.phrase), rtx)).is_err() {
+                    break;
+                }
+                let _ = rrx.recv_timeout(Duration::from_secs(30));
+            }
+        });
+    }
+
     fn halt(&mut self) {
+        // A stop is written at once, so a reboot right after it plays nothing.
+        if self.resume_at.is_none() {
+            self.resume_saved = None;
+        }
         if let Some(f) = self.flags.take() {
             f.stop.store(true, Ordering::Release);
         }
@@ -765,12 +1308,12 @@ impl Controller {
         let client = self.client.clone();
         let shared = self.shared.clone();
         let tx = self.tx.clone();
-        let device = self.device.clone();
+        let device = self.out_device();
         let prefetch = self.client.prefetch.clone();
-        eprintln!("play: {}", track.name());
+        eprintln!("play: {} → {device}", track.name());
         // Not again for a resume after a broken download.
         if skip_ms == 0 {
-            self.history.track(track.name(), track.permalink_url.as_deref());
+            self.history.track(track.name(), track.permalink_url.as_deref(), track.cover(), track.id);
         }
         let duration_ms = track.duration.unwrap_or(0);
         thread::spawn(move || {
@@ -1077,6 +1620,20 @@ impl Controller {
                     Err(text) => respond(reply, &format!("error: {text}"), Some(text)),
                 });
             }
+            Intent::Tv(alice::TvAction::RemoteMode(true)) if self.settings.tv_host.trim().is_empty() => {
+                let text = "Пульт работает с телевизором, а он ещё не добавлен. Добавьте его на странице колонки, в разделе Устройства";
+                respond(reply, &format!("error: {text}"), Some(text.into()));
+            }
+            Intent::Tv(alice::TvAction::RemoteMode(on)) => {
+                alice::tv_remote(on);
+                let text = if on {
+                    "Режим пульта. Говорите: Алиса, вправо, влево, ок, назад, пауза. Выключить: Алиса, выключи режим пульта"
+                } else {
+                    "Режим пульта выключен"
+                };
+                eprintln!("tv: remote mode {on}");
+                respond(reply, &format!("OK: {text}"), Some(text.into()));
+            }
             Intent::Tv(action) => {
                 let host = self.settings.tv_host.clone();
                 if host.is_empty() {
@@ -1086,9 +1643,15 @@ impl Controller {
                 // ADB (and making the key the first time) takes a moment: off the controller.
                 let dir = self.dir.clone();
                 thread::spawn(move || match tv::run(&host, &dir, &action) {
+                    Ok(json) if action == alice::TvAction::Apps => respond(reply, &json, None),
                     Ok(text) => {
+                        // «Ещё», «ниже», «нажми …» without «на проекторе» for the next minute and a half.
+                        alice::tv_used(match action {
+                            alice::TvAction::Key(k, _) => Some(k),
+                            _ => None,
+                        });
                         // Short confirmations are not worth Alice's voice for keys.
-                        let say = (!matches!(action, alice::TvAction::Key(..))).then(|| text.clone());
+                        let say = (!matches!(action, alice::TvAction::Key(..) | alice::TvAction::OpenPackage(_))).then(|| text.clone());
                         respond(reply, &format!("OK: {text}"), say);
                     }
                     Err(text) => respond(reply, &format!("error: {text}"), Some(text)),
@@ -1135,6 +1698,93 @@ impl Controller {
                 }
                 None => respond(reply, "error: сейчас ничего не играет", None),
             },
+            Intent::Duck(cmd) => {
+                let text = match cmd {
+                    alice::DuckCmd::Down => {
+                        ducking::manual(Some(f32::from(self.settings.duck_call_level.min(100)) / 100.0));
+                        "Приглушила"
+                    }
+                    alice::DuckCmd::Restore => {
+                        ducking::manual(None);
+                        "Вернула громкость"
+                    }
+                    alice::DuckCmd::Auto(on) => {
+                        let mut s = self.settings.clone();
+                        s.duck_mode = if on { "smart" } else { "off" }.into();
+                        let r = self.apply_settings(s);
+                        if r.starts_with("error") {
+                            respond(reply, &r, None);
+                            return;
+                        }
+                        if on { "Автоматическое приглушение включено" } else { "Автоматическое приглушение выключено" }
+                    }
+                };
+                respond(reply, &format!("OK: {text}"), Some(text.into()));
+            }
+            Intent::VoiceLevel(by) => {
+                let mut s = self.settings.clone();
+                s.alice_voice = (i16::from(s.alice_voice) + i16::from(by)).clamp(10, 100) as u8;
+                let pct = s.alice_voice;
+                let r = self.apply_settings(s);
+                let text = if r.starts_with("error") {
+                    "Не получилось поменять громкость голоса".to_owned()
+                } else if pct >= 100 {
+                    "Говорю как обычно".to_owned()
+                } else {
+                    format!("Хорошо. Мой голос — {pct} процентов от громкости")
+                };
+                respond(reply, &format!("OK: {text}"), Some(text));
+            }
+            Intent::TgReply(text) => {
+                let say = telegram::reply_draft(&text);
+                respond(reply, &format!("OK: {say}"), Some(say));
+            }
+            Intent::TgConfirm(yes) => {
+                let shared = self.shared.clone();
+                thread::spawn(move || {
+                    let say = telegram::confirm(yes, &shared);
+                    respond(reply, &format!("OK: {say}"), Some(say));
+                });
+            }
+            // Google may take a few seconds: not on the controller's thread.
+            Intent::Planner(v) => {
+                thread::spawn(move || {
+                    let start = std::time::Instant::now();
+                    let text = planner::handle(v);
+                    eprintln!("planner: answered in {} ms (from the phrase: {})", start.elapsed().as_millis(), alice::since_heard());
+                    respond(reply, &format!("OK: {text}"), Some(text));
+                });
+            }
+            Intent::UpdateConfirm(yes) => {
+                let text = self.shared.updates.confirm_uploaded(yes);
+                eprintln!("update: from the app, answer {yes} → {text}");
+                respond(reply, &format!("OK: {text}"), Some(text));
+            }
+            Intent::Timer(v) => {
+                let text = timer::command(&v, self.settings.pomo());
+                eprintln!("timer: {v:?} → {text}");
+                self.share_status();
+                respond(reply, &format!("OK: {text}"), Some(text));
+            }
+            Intent::Address => {
+                let text = hello::repeat();
+                respond(reply, &format!("OK: {text}"), None);
+            }
+            Intent::BtOut(on) => {
+                let name = self.settings.bt_name.clone();
+                let text = if !bt::valid_mac(&self.settings.bt_mac) {
+                    "Наушники не выбраны: подключите их на странице колонки, раздел «Bluetooth»".to_owned()
+                } else {
+                    self.settings.bt_on = on;
+                    self.bt_save();
+                    match (on, bt::connected(&self.settings.bt_mac)) {
+                        (false, _) => "Музыка снова на колонке".to_owned(),
+                        (true, true) => format!("Музыка в {name}"),
+                        (true, false) => format!("Включите {name}: музыка перейдёт туда, как только они подключатся"),
+                    }
+                };
+                respond(reply, &format!("OK: {text}"), Some(text));
+            }
             Intent::WhatPlaying if self.shared.airplay.is_active() => {
                 let text = "Сейчас играет музыка с телефона по AirPlay".to_owned();
                 respond(reply, &text, Some(text.clone()));
@@ -1146,6 +1796,67 @@ impl Controller {
                 }
                 None => respond(reply, "сейчас ничего не играет", Some("Сейчас ничего не играет".into())),
             },
+        }
+    }
+
+    /// Re-syncs macros to the shared state and saves settings.
+    fn save_macros(&mut self) {
+        *self.shared.macros.lock().unwrap() = macro_list(&self.settings);
+        if let Err(e) = self.settings.save(&self.dir) {
+            eprintln!("macros: not saved: {e}");
+        }
+    }
+
+    /// Runs a macro's script: one panel command per line; «wait N» pauses N ms.
+    /// On its own thread (0.4.41 slept on the controller thread, freezing voice
+    /// and the page for the whole script); each command goes through the
+    /// controller like one from the page, and the next waits for its answer.
+    fn run_macro(&mut self, script: &str) -> Result<(), String> {
+        let lines = macro_lines(script)?;
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let started = std::time::Instant::now();
+            for line in lines {
+                if started.elapsed() > Duration::from_secs(120) {
+                    eprintln!("macro: stopped after 2 minutes");
+                    break;
+                }
+                if let Some(ms) = line.strip_prefix("wait ").or_else(|| line.strip_prefix("sleep ")) {
+                    thread::sleep(Duration::from_millis(ms.trim().parse::<u64>().unwrap_or(0).min(30_000)));
+                    continue;
+                }
+                let (rtx, rrx) = mpsc::channel();
+                if tx.send(Cmd::Control(line.clone(), rtx)).is_err() {
+                    break;
+                }
+                let answer = rrx.recv_timeout(Duration::from_secs(60)).unwrap_or_else(|_| "timeout".into());
+                eprintln!("macro: {line} -> {answer}");
+            }
+        });
+        Ok(())
+    }
+
+    /// The scenario chosen for a pomodoro event («work» | «break» | «done»), if any.
+    fn pomodoro_scenario(&mut self, event: &str) {
+        let phrase = match event {
+            "work" => self.settings.pomo_on_work.clone(),
+            "break" => self.settings.pomo_on_break.clone(),
+            _ => self.settings.pomo_on_done.clone(),
+        };
+        if phrase.trim().is_empty() {
+            return;
+        }
+        let key = norm_phrase(&phrase);
+        match self.settings.macros.iter().find(|m| norm_phrase(&m.phrase) == key).map(|m| m.script.clone()) {
+            Some(script) => {
+                // Its own «timer …» steps would start the pomodoro again and again: skipped here.
+                let script = without_timer(&script);
+                eprintln!("timer: pomodoro {event} → scenario «{phrase}»");
+                if let Err(e) = self.run_macro(&script) {
+                    eprintln!("timer: scenario «{phrase}»: {e}");
+                }
+            }
+            None => eprintln!("timer: pomodoro {event}: scenario «{phrase}» is gone"),
         }
     }
 
@@ -1212,6 +1923,16 @@ impl Controller {
             }
             "myplaylist" if !arg.is_empty() => self.intent(Intent::MyPlaylist(arg), Some(reply)),
             // «Недавно играло» on the page; «history clear» empties it.
+            // «Недавно играло» → play it all again.
+            "history" if arg == "play" => {
+                let ids = self.history.recent_ids(100);
+                if ids.is_empty() {
+                    send_to(&reply, "error: история пуста".into());
+                } else {
+                    self.asked = Some(("Недавно играло".into(), "history play".into()));
+                    self.fetch("«Недавно играло»".into(), Some(reply), move |c| c.by_ids(&ids));
+                }
+            }
             "history" => {
                 if arg == "clear" {
                     self.history.clear();
@@ -1240,12 +1961,33 @@ impl Controller {
                     None => send_to(&reply, "usage: seek 95 | seek 1:35 | seek +30 | seek -10".into()),
                 }
             }
-            // tv ping | tv do <фраза> — from the settings page and the command line.
+            // tv ping | do <фраза> | wake | sleep | open <имя> | openpkg <пакет> |
+            // close <имя|пакет> | key <home|back|ok…> [N] | apps | search <q> | youtube <q>
+            // — from the settings page, the macro editor and the command line.
             "tv" => {
-                let (what, phrase) = arg.split_once(' ').unwrap_or((arg.as_str(), ""));
+                let (what, rest) = arg.split_once(' ').unwrap_or((arg.as_str(), ""));
+                let rest = rest.trim();
                 let action = match what {
                     "ping" => Some(alice::TvAction::Ping),
-                    "do" | "say" => match alice::intent(&format!("{} на телевизоре", phrase.trim()), false) {
+                    "wake" | "on" => Some(alice::TvAction::Wake),
+                    "sleep" | "off" => Some(alice::TvAction::Sleep),
+                    "apps" => Some(alice::TvAction::Apps),
+                    "open" if !rest.is_empty() => Some(alice::TvAction::Open(rest.to_owned())),
+                    "openpkg" if !rest.is_empty() => Some(alice::TvAction::OpenPackage(rest.to_owned())),
+                    "close" if !rest.is_empty() => Some(alice::TvAction::Close(rest.to_owned())),
+                    "search" if !rest.is_empty() => Some(alice::TvAction::Search(rest.to_owned())),
+                    "youtube" if !rest.is_empty() => Some(alice::TvAction::YouTube(rest.to_owned())),
+                    // A scenario's «Нажать на экране»: what is written on it.
+                    "tap" if !rest.is_empty() => Some(alice::TvAction::Tap(rest.to_owned())),
+                    "first" => Some(alice::TvAction::PlayFirst),
+                    "key" => {
+                        let (name, n) = rest.split_once(' ').unwrap_or((rest, "1"));
+                        alice::TV_KEYS
+                            .iter()
+                            .find(|(k, _, _)| *k == name)
+                            .map(|(_, code, _)| alice::TvAction::Key(code, n.trim().parse::<u8>().unwrap_or(1).clamp(1, 20)))
+                    }
+                    "do" | "say" => match alice::intent(&format!("{rest} на телевизоре"), false) {
                         Some(Intent::Tv(a)) => Some(a),
                         _ => None,
                     },
@@ -1253,7 +1995,7 @@ impl Controller {
                 };
                 match action {
                     Some(a) => self.intent(Intent::Tv(a), Some(reply)),
-                    None => send_to(&reply, "usage: tv ping | tv do <фраза, например: открой ютуб>".into()),
+                    None => send_to(&reply, "usage: tv ping | wake | sleep | apps | open <имя> | openpkg <пакет> | close <имя> | key <кнопка> [N] | tap <надпись> | first | search <q> | youtube <q> | do <фраза>".into()),
                 }
             }
             "pc" => {
@@ -1266,21 +2008,98 @@ impl Controller {
                     "shutdown" | "off" => Some(alice::PcAction::Shutdown),
                     "restart" => Some(alice::PcAction::Restart),
                     "lock" => Some(alice::PcAction::Lock),
+                    "metrics" => Some(alice::PcAction::Metrics),
+                    "process" if !name.is_empty() => Some(alice::PcAction::Process(name)),
                     "open" if !name.is_empty() => Some(alice::PcAction::Open(name)),
                     "close" if !name.is_empty() => Some(alice::PcAction::Close(name)),
                     // pc do открой ютуб в профиле работа — as if said to Alice
                     "do" | "say" if !name.is_empty() => Some(alice::PcAction::Command(name)),
+                    // From scenarios: «pc click 500 300», «pc key cmd+t».
+                    "click" => pc::click_spec(&name).map(alice::PcAction::Click),
+                    "key" => pc::key_spec(&name).map(alice::PcAction::Key),
                     _ => None,
                 };
                 match action {
                     Some(a) => self.intent(Intent::Pc(a), Some(reply)),
-                    None => send_to(&reply, "usage: pc ping|wake|sleep|shutdown|restart|lock|open <программа>|close <программа>|do <фраза>".into()),
+                    None => send_to(&reply, "usage: pc ping|wake|sleep|shutdown|restart|lock|open <программа>|close <программа>|do <фраза>|click <x> <y> [double|right]|key <клавиша, например cmd+t>".into()),
                 }
             }
             "stop" => {
                 self.halt();
                 self.publish();
                 send_to(&reply, "OK".into());
+            }
+            // «macro list | add <фраза> ||| <команды> | del <фраза> | run <фраза>»
+            "macro" => {
+                let (sub, rest) = arg.split_once(' ').unwrap_or((arg.as_str(), ""));
+                let rest = rest.trim();
+                match sub {
+                    "json" => send_to(&reply, serde_json::json!({
+                        "macros": self.settings.macros,
+                        // Names for the TV apps the saved scenarios open (no TV needed).
+                        "tv_names": self.settings.macros.iter()
+                            .flat_map(|m| m.script.lines())
+                            .filter_map(|l| l.trim().strip_prefix("tv openpkg "))
+                            .map(|p| (p.trim().to_owned(), serde_json::Value::from(tv::label(p.trim()))))
+                            .collect::<serde_json::Map<_, _>>(),
+                        "commands": MACRO_COMMANDS,
+                        "tv_keys": alice::TV_KEYS.iter().map(|(k, _, l)| [k, l]).collect::<Vec<_>>(),
+                    }).to_string()),
+                    // Runs a script from the editor without saving it.
+                    "try" => match self.run_macro(rest) {
+                        Ok(()) => send_to(&reply, "OK: выполняю".into()),
+                        Err(e) => send_to(&reply, format!("error: {e}")),
+                    },
+                    "list" => {
+                        let list = self
+                            .settings
+                            .macros
+                            .iter()
+                            .map(|m| format!("{} => {}", m.phrase, m.script.replace('\n', "; ")))
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        send_to(&reply, if list.is_empty() { "нет макросов".into() } else { list });
+                    }
+                    "add" => match rest.split_once("|||") {
+                        Some((_, script)) if macro_lines(script).is_err() => {
+                            send_to(&reply, format!("error: {}", macro_lines(script).unwrap_err()));
+                        }
+                        Some((phrase, script)) if !phrase.trim().is_empty() && !script.trim().is_empty() => {
+                            let phrase = phrase.trim().to_owned();
+                            let script = script.trim().to_owned();
+                            let key = norm_phrase(&phrase);
+                            self.settings.macros.retain(|m| norm_phrase(&m.phrase) != key);
+                            self.settings.macros.push(settings::Macro { phrase, script });
+                            self.save_macros();
+                            send_to(&reply, "OK: макрос сохранён".into());
+                        }
+                        _ => send_to(&reply, "usage: macro add <фраза> ||| <команды через перенос строки>".into()),
+                    },
+                    "del" | "delete" | "remove" => {
+                        let key = norm_phrase(rest);
+                        let before = self.settings.macros.len();
+                        self.settings.macros.retain(|m| norm_phrase(&m.phrase) != key);
+                        if self.settings.macros.len() == before {
+                            send_to(&reply, "макрос не найден".into());
+                        } else {
+                            self.save_macros();
+                            send_to(&reply, "OK: удалён".into());
+                        }
+                    }
+                    "run" => {
+                        let key = norm_phrase(rest);
+                        let script =
+                            self.settings.macros.iter().find(|m| norm_phrase(&m.phrase) == key).map(|m| m.script.clone());
+                        match script {
+                            Some(script) => match self.run_macro(&script) {
+                                Ok(()) => send_to(&reply, "OK".into()),
+                                Err(e) => send_to(&reply, format!("error: {e}")),
+                            },
+                            None => send_to(&reply, "макрос не найден".into()),
+                        }
+                    }
+                    _ => send_to(&reply, "usage: macro list | add <фраза> ||| <команды> | del <фраза> | run <фраза>".into()),
+                }
             }
             "queue" => send_to(&reply,
                 self.queue
@@ -1291,6 +2110,46 @@ impl Controller {
                     .join("\n"),
             ),
             "status" => send_to(&reply, self.status()),
+            // Bluetooth output (bt.rs): «bt status | scan | connect MAC | on | off | disconnect | forget MAC».
+            "bt" => self.bt_cmd(&arg, reply),
+            // soundya's timer (timer.rs): «timer start <секунды> [название] | pomodoro [название] |
+            // pause | resume | skip | stop | left | json».
+            // «meet test <id группы>»: the page's «Проверить» — a test message with the meeting bot.
+            "meet" => {
+                let chat = arg.strip_prefix("test").map(str::trim).and_then(|c| c.parse::<i64>().ok());
+                let Some(chat) = chat.filter(|c| *c != 0) else {
+                    send_to(&reply, "error: нужен id группы, например -1001234567890".into());
+                    return;
+                };
+                let token = self.settings.meet_bot_token.clone();
+                thread::spawn(move || {
+                    let text = "soundya: проверка — сюда будут приходить ссылки на созвоны";
+                    let r = if token.is_empty() { telegram::send_to_chat(0, chat, text) } else { telegram::send_with(&token, chat, text) };
+                    send_to(&reply, r.map_or_else(|e| format!("error: Telegram: {e}"), |()| "OK: сообщение отправлено в группу".into()));
+                });
+            }
+            "timer" => {
+                let (what, rest) = arg.split_once(' ').unwrap_or((arg.as_str(), ""));
+                let r = match what {
+                    "json" => timer::json().to_string(),
+                    "start" => {
+                        let (secs, label) = rest.trim().split_once(' ').unwrap_or((rest.trim(), ""));
+                        match secs.parse::<u64>() {
+                            Ok(n) if (1..=24 * 3600).contains(&n) => format!("OK: {}", timer::start_plain(n, label)),
+                            _ => "error: время таймера — от 1 секунды до 24 часов".into(),
+                        }
+                    }
+                    "pomodoro" => format!("OK: {}", timer::start_pomodoro(self.settings.pomo(), rest)),
+                    "pause" => format!("OK: {}", timer::command(&timer::Voice::Pause, self.settings.pomo())),
+                    "resume" => format!("OK: {}", timer::command(&timer::Voice::Resume, self.settings.pomo())),
+                    "skip" => format!("OK: {}", timer::command(&timer::Voice::Skip, self.settings.pomo())),
+                    "stop" => format!("OK: {}", timer::command(&timer::Voice::Stop, self.settings.pomo())),
+                    "left" => format!("OK: {}", timer::command(&timer::Voice::Left, self.settings.pomo())),
+                    _ => "usage: timer start <секунды> [название] | pomodoro | pause | resume | skip | stop | left | json".into(),
+                };
+                self.share_status();
+                send_to(&reply, r);
+            }
             // «volume set 6» (the slider), «volume up» / «volume down 3»: Alice's own volume.
             "volume" => {
                 let (what, n) = arg.split_once(' ').unwrap_or((arg.as_str(), "1"));
@@ -1307,6 +2166,314 @@ impl Controller {
                 });
             }
             "netcheck" => self.check_net(Some(reply)),
+            // The panel's «Проверить»: Alice says a sentence at the chosen voice volume.
+            "voicetest" => {
+                alice::say("Так звучит мой голос. Музыка при этом остаётся на прежней громкости.".into());
+                send_to(&reply, "OK: слушайте".into());
+            }
+            // «duck down | restore | auto on|off» — the page's buttons, same as the voice commands.
+            "duck" => {
+                let cmd = match arg.as_str() {
+                    "down" => Some(alice::DuckCmd::Down),
+                    "restore" | "up" => Some(alice::DuckCmd::Restore),
+                    "auto on" => Some(alice::DuckCmd::Auto(true)),
+                    "auto off" => Some(alice::DuckCmd::Auto(false)),
+                    _ => None,
+                };
+                match cmd {
+                    Some(c) => self.intent(Intent::Duck(c), Some(reply)),
+                    None => send_to(&reply, "usage: duck down | restore | auto on | auto off".into()),
+                }
+            }
+            // The home screen's widgets that ask the outside: «widgets json» → {weather, pc}.
+            "widgets" => {
+                let shared = self.shared.clone();
+                let s = self.settings.clone();
+                thread::spawn(move || {
+                    let weather = match (s.display_lat, s.display_lon) {
+                        (Some(la), Some(lo)) => display::home_weather(&shared, la, lo)
+                            .map(|mut w| {
+                                w["city"] = s.display_city.clone().into();
+                                w
+                            })
+                            .unwrap_or_else(|e| serde_json::json!({ "error": e })),
+                        _ => serde_json::json!({ "error": "no city" }),
+                    };
+                    let pc = if s.pc_configured() && s.pc_on {
+                        pc::metrics_raw(&s).unwrap_or_else(|e| serde_json::json!({ "error": e }))
+                    } else {
+                        serde_json::Value::Null
+                    };
+                    let _ = reply.send(serde_json::json!({ "weather": weather, "pc": pc }).to_string());
+                });
+            }
+            // «display city <город>»: the weather's place, found by name.
+            "display" => {
+                let (what, rest) = arg.split_once(' ').unwrap_or((arg.as_str(), ""));
+                match what {
+                    "city" if !rest.trim().is_empty() => {
+                        let shared = self.shared.clone();
+                        let tx = self.tx.clone();
+                        let name = rest.trim().to_owned();
+                        thread::spawn(move || {
+                            let r = match display::find_city(&shared, &name) {
+                                Ok((n, la, lo)) => {
+                                    let (rtx, rrx) = mpsc::channel();
+                                    let patch = serde_json::json!({ "display_city": n, "display_lat": la, "display_lon": lo });
+                                    let _ = tx.send(Cmd::Settings(patch, rtx));
+                                    let _ = rrx.recv_timeout(Duration::from_secs(10));
+                                    format!("OK: {n} ({la:.2}, {lo:.2})")
+                                }
+                                Err(e) => format!("error: {e}"),
+                            };
+                            let _ = reply.send(r);
+                        });
+                    }
+                    "test" => {
+                        display::notify("tg");
+                        send_to(&reply, "OK".into());
+                    }
+                    _ => send_to(&reply, "usage: display city <город> | display test".into()),
+                }
+            }
+            // «tg reply <текст> | tg yes | tg no» — the voice flow from the command line.
+            "tg" => {
+                let (what, rest) = arg.split_once(' ').unwrap_or((arg.as_str(), ""));
+                match what {
+                    "reply" if !rest.trim().is_empty() => self.intent(Intent::TgReply(rest.trim().to_owned()), Some(reply)),
+                    "yes" => self.intent(Intent::TgConfirm(true), Some(reply)),
+                    "no" => self.intent(Intent::TgConfirm(false), Some(reply)),
+                    _ => send_to(&reply, "usage: tg reply <текст> | tg yes | tg no".into()),
+                }
+            }
+            // The panel's «Планы»: «plan json», «plan add {json}», «plan done|undone|del <id>».
+            "plan" => {
+                let (what, rest) = arg.split_once(' ').unwrap_or((arg.as_str(), ""));
+                let id = rest.trim().parse::<u64>().ok();
+                let r = match (what, id) {
+                    ("json", _) => planner::json().to_string(),
+                    ("add", _) => match serde_json::from_str::<serde_json::Value>(rest) {
+                        Ok(v) if v["title"].as_str().is_some_and(|t| !t.trim().is_empty()) => {
+                            let t = planner::add(
+                                v["title"].as_str().unwrap_or(""),
+                                v["due"].as_i64(),
+                                v["repeat"].as_str().unwrap_or(""),
+                                v["remind"].as_bool().unwrap_or(v["due"].is_i64()),
+                                v["category"].as_str().unwrap_or(""),
+                                v["priority"].as_str().unwrap_or("normal"),
+                            );
+                            if v["profile"] == "work" {
+                                // Linking to Google is a network call: not on the controller
+                                // (voice and music would wait for it), like «edit» below.
+                                thread::spawn(move || send_to(&reply, planner::make_work(t.id)));
+                                return;
+                            } else {
+                                format!("OK: добавлено «{}»", t.title)
+                            }
+                        }
+                        _ => "error: нужен заголовок".into(),
+                    },
+                    ("done", Some(id)) => if planner::set_done(id, true) { "OK".into() } else { "error: нет такой задачи".into() },
+                    ("undone", Some(id)) => if planner::set_done(id, false) { "OK".into() } else { "error: нет такой задачи".into() },
+                    ("del", Some(id)) => if planner::delete(id) { "OK".into() } else { "error: нет такой задачи".into() },
+                    // The page's pencil: {"id","title","due","repeat","priority"}; a work task's copy in Google changes too.
+                    ("edit", _) => {
+                        let v: serde_json::Value = serde_json::from_str(rest).unwrap_or_default();
+                        match planner::edit(v["id"].as_u64().unwrap_or(0), v["title"].as_str().unwrap_or(""), v["due"].as_i64(),
+                                            v["repeat"].as_str().unwrap_or(""), v["priority"].as_str().unwrap_or("normal")) {
+                            None => "error: нет такой задачи или пустое название".into(),
+                            Some(t) if t.g_id.is_empty() => format!("OK: сохранено «{}»", t.title),
+                            Some(t) => {
+                                thread::spawn(move || {
+                                    let off = planner::offset();
+                                    let notes = t.due.map(|d| format!("до {}", planner::hm(d, off))).unwrap_or_default();
+                                    let r = calendar::update_task(&t.g_list, &t.g_id, &t.title, t.due.map(|d| planner::local(d, off).0), &notes);
+                                    send_to(&reply, r.map_or_else(|e| format!("error: на колонке сохранено, Google не принял: {e}"), |_| format!("OK: сохранено «{}», и в Google", t.title)));
+                                });
+                                return;
+                            }
+                        }
+                    }
+                    // A Google task from the page's pencil: {"list","id","title","day":"YYYY-MM-DD"|null,"time":"HH:MM"|null}.
+                    ("gedit", _) => {
+                        let v: serde_json::Value = serde_json::from_str(rest).unwrap_or_default();
+                        let title = v["title"].as_str().unwrap_or("").trim().to_owned();
+                        if title.is_empty() {
+                            send_to(&reply, "error: нужно название".into());
+                            return;
+                        }
+                        thread::spawn(move || {
+                            let day = v["day"].as_str().and_then(|d| {
+                                let p: Vec<i64> = d.split('-').filter_map(|x| x.parse().ok()).collect();
+                                (p.len() == 3).then(|| planner::days_from_civil(p[0], p[1] as u32, p[2] as u32))
+                            });
+                            let notes = v["time"].as_str().and_then(|t| t.split_once(':')).and_then(|(h, m)| Some(format!("до {}:{:02}", h.parse::<u32>().ok()?, m.parse::<u32>().ok()?))).unwrap_or_default();
+                            let r = calendar::update_task(v["list"].as_str().unwrap_or(""), v["id"].as_str().unwrap_or(""), &title, day, &notes);
+                            send_to(&reply, r.map_or_else(|e| format!("error: {e}"), |_| format!("OK: сохранено «{title}»")));
+                        });
+                        return;
+                    }
+                    ("say", _) => match planner::voice(&alice::normalize_phrase(rest)) {
+                        Some(v) => {
+                            // Google may take a few seconds.
+                            thread::spawn(move || send_to(&reply, format!("OK: {}", planner::handle(v))));
+                            return;
+                        }
+                        None => "error: не поняла фразу".into(),
+                    },
+                    // The page's day card, and «Сказать вслух».
+                    ("text" | "speak", _) => {
+                        let text = planner::agenda_text(match rest.trim() {
+                            "tomorrow" => planner::Ask::Plans(1),
+                            "week" => planner::Ask::Week,
+                            "deadlines" => planner::Ask::Deadlines,
+                            "brief" => planner::Ask::Brief,
+                            _ => planner::Ask::Plans(0),
+                        }, planner::now(), planner::offset());
+                        if what == "speak" {
+                            alice::say(text.clone());
+                        }
+                        format!("OK: {text}")
+                    }
+                    // Google tasks from the page: «plan gdone <list> <id>», «plan gdel <list> <id>».
+                    ("gdone" | "gdel", _) => {
+                        let mut it = rest.split_whitespace();
+                        let (list, id) = (it.next().unwrap_or("").to_owned(), it.next().unwrap_or("").to_owned());
+                        let del = what == "gdel";
+                        thread::spawn(move || {
+                            let r = if del { calendar::delete_task(&list, &id) } else { calendar::complete_task(&list, &id) };
+                            send_to(&reply, r.map_or_else(|e| format!("error: {e}"), |_| "OK".into()));
+                        });
+                        return;
+                    }
+                    // New Google task or event from the page: {"title","day","time","event":bool,"minutes"}.
+                    ("gadd", _) => {
+                        let v: serde_json::Value = serde_json::from_str(rest).unwrap_or_default();
+                        let title = v["title"].as_str().unwrap_or("").trim().to_owned();
+                        if title.is_empty() {
+                            send_to(&reply, "error: нужно название".into());
+                            return;
+                        }
+                        thread::spawn(move || {
+                            let off = planner::offset();
+                            let day = v["day"].as_str().and_then(|d| {
+                                let p: Vec<i64> = d.split('-').filter_map(|x| x.parse().ok()).collect();
+                                (p.len() == 3).then(|| planner::days_from_civil(p[0], p[1] as u32, p[2] as u32))
+                            });
+                            let time = v["time"].as_str().and_then(|t| t.split_once(':')).and_then(|(h, m)| Some(h.parse::<i64>().ok()? * 3600 + m.parse::<i64>().ok()? * 60));
+                            let r = if v["event"].as_bool().unwrap_or(false) {
+                                match (day, time) {
+                                    (Some(d), Some(t)) => {
+                                        let start = d * 86_400 + t - off;
+                                        calendar::add_event(&title, start, start + v["minutes"].as_i64().unwrap_or(60).clamp(5, 1440) * 60, false)
+                                    }
+                                    (Some(d), None) => calendar::add_event(&title, d * 86_400 - off, 0, true),
+                                    _ => Err("для события нужна дата".into()),
+                                }
+                            } else {
+                                let notes = time.map(|t| format!("до {}:{:02}", t / 3600, t / 60 % 60)).unwrap_or_default();
+                                calendar::add_task(&title, day, &notes)
+                            };
+                            send_to(&reply, r.map_or_else(|e| format!("error: {e}"), |w| format!("OK: добавлено в «{w}»")));
+                        });
+                        return;
+                    }
+                    _ => "usage: plan json | add {json} | done|undone|del <id> | edit {json} | say <фраза> | speak today|tomorrow|week|deadlines|brief | gadd {json} | gdone|gdel <list> <id> | gedit {json}".into(),
+                };
+                send_to(&reply, r);
+            }
+            // The panel's wizard: «hello start | step N | done», «hello address».
+            "hello" => {
+                let (what, n) = arg.split_once(' ').unwrap_or((arg.as_str(), ""));
+                match what {
+                    "start" => hello::start(),
+                    "step" => hello::step(n.trim().parse().unwrap_or(1)),
+                    "done" => hello::done(),
+                    "address" => {
+                        self.intent(Intent::Address, Some(reply));
+                        return;
+                    }
+                    _ => {
+                        send_to(&reply, "usage: hello start | step N | done | address".into());
+                        return;
+                    }
+                }
+                send_to(&reply, "OK".into());
+            }
+            // «pin set <PIN> | pin off» — from the panel (behind the current PIN) or
+            // `soundya pin off` over adb when the PIN is forgotten.
+            "pin" => {
+                let pin = match arg.split_once(' ') {
+                    Some(("set", p)) => p.trim().to_owned(),
+                    _ if arg == "off" => String::new(),
+                    _ => {
+                        send_to(&reply, "usage: pin set <4–12 цифр> | pin off".into());
+                        return;
+                    }
+                };
+                if !pin.is_empty() && !(4..=12).contains(&pin.len()) || !pin.chars().all(|c| c.is_ascii_digit()) {
+                    send_to(&reply, "error: PIN — от 4 до 12 цифр".into());
+                    return;
+                }
+                self.settings.panel_pin = pin.clone();
+                auth::set_pin(&self.dir, &pin);
+                let r = match self.settings.save(&self.dir) {
+                    Ok(()) if pin.is_empty() => "OK: PIN выключен".to_owned(),
+                    Ok(()) => "OK: PIN установлен".to_owned(),
+                    Err(e) => format!("error: не сохранилось: {e}"),
+                };
+                send_to(&reply, r);
+            }
+            // «ledtest 0|1|2»: the ring test on the page (one raw channel file).
+            // Google sign-in: «google url», «google code <адрес из браузера>», «google off».
+            "google" => {
+                let (what, rest) = arg.split_once(' ').unwrap_or((arg.as_str(), ""));
+                match what {
+                    "url" => send_to(&reply, if self.settings.g_client_id.is_empty() || self.settings.g_client_secret.is_empty() {
+                        "error: сначала сохраните ID и секрет клиента".into()
+                    } else {
+                        format!("OK {}", google::auth_url(&self.settings.g_client_id))
+                    }),
+                    "code" => {
+                        let (id, secret) = (self.settings.g_client_id.clone(), self.settings.g_client_secret.clone());
+                        let (shared, tx, pasted) = (self.shared.clone(), self.tx.clone(), rest.to_owned());
+                        thread::spawn(move || {
+                            let proxy = shared.proxy.lock().unwrap().clone();
+                            let r = sc::build_agent(&proxy).map_err(|e| e.to_string()).and_then(|a| google::exchange(&a, &id, &secret, &pasted));
+                            let text = match r {
+                                Ok(refresh) => {
+                                    let (rtx, rrx) = mpsc::channel();
+                                    let _ = tx.send(Cmd::Settings(serde_json::json!({ "g_refresh": refresh, "g_on": true }), rtx));
+                                    let _ = rrx.recv_timeout(Duration::from_secs(10));
+                                    eprintln!("google: signed in");
+                                    "OK: Google подключён".to_owned()
+                                }
+                                Err(e) => format!("error: {e}"),
+                            };
+                            send_to(&reply, text);
+                        });
+                    }
+                    "off" => {
+                        let mut new = self.settings.clone();
+                        new.g_refresh.clear();
+                        new.g_on = false;
+                        let r = self.apply_settings(new);
+                        send_to(&reply, if r.starts_with("error") { r } else { "OK: Google отключён".into() });
+                    }
+                    _ => send_to(&reply, "usage: google url | code <адрес> | off".into()),
+                }
+            }
+            // «Обновить сейчас» in «Планы» → «Календарь».
+            "calendar" => send_to(&reply, if calendar::active() || calendar::google_on() {
+                calendar::wake();
+                "OK: обновляю календарь".into()
+            } else {
+                "error: календарь выключен или адрес не задан".into()
+            }),
+            "ledtest" => send_to(&reply, match arg.parse::<usize>() {
+                Ok(c) => led::test(c).unwrap_or_else(|e| format!("error: {e}")),
+                Err(_) => "usage: ledtest 0|1|2".into(),
+            }),
             // «Удалить soundya» on the settings page: the speaker becomes plain Alice again.
             "uninstall" => {
                 let r = if luna::active() {
@@ -1440,7 +2607,7 @@ impl Controller {
                     } else {
                         shared.updates.check(&proxy).map(|r| match r {
                             Some(r) => format!("OK: доступна версия {}", r.version),
-                            None => format!("OK: стоит последняя версия {}", env!("CARGO_PKG_VERSION")),
+                            None => format!("OK: стоит последняя версия {}", VERSION),
                         })
                     };
                     let _ = reply.send(r.unwrap_or_else(|e| format!("error: {e}")));
@@ -1484,8 +2651,10 @@ impl Controller {
         }
     }
 
-    fn start_up(self, rx: Receiver<Cmd>) {
+    fn start_up(mut self, rx: Receiver<Cmd>) {
         self.check_login();
+        self.resume_after_restart();
+        self.autostart();
         self.run(rx);
     }
 
@@ -1494,6 +2663,18 @@ impl Controller {
             if self.net_checked.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) && !self.net_checking {
                 self.net_checked = Some(std::time::Instant::now());
                 self.check_net(None);
+            }
+            self.save_resume();
+            // A refused SoundCloud token is asked again now and then: when it
+            // works (it was a passing 401), the login comes back by itself.
+            // SoundCloud changes its site key (client_id) every day or two: read it ahead, not when a command fails.
+            self.client.keep_fresh();
+            if self.client.token_refused() && self.token_checked.is_none_or(|t| t.elapsed() > Duration::from_secs(600)) {
+                self.token_checked = Some(std::time::Instant::now());
+                self.check_login();
+            }
+            for e in timer::take_events() {
+                self.pomodoro_scenario(e);
             }
             let Ok(cmd) = rx.recv_timeout(Duration::from_secs(1)) else {
                 self.history.flush(false);
@@ -1507,6 +2688,11 @@ impl Controller {
                     let arg = arg.trim().to_owned();
                     match cmd {
                         // Read-only requests answer the page directly from a worker thread.
+                        // «Проверить возможности колонки» (probe.rs): only reads, a few seconds.
+                        "probe" => {
+                            let dir = self.dir.clone();
+                            thread::spawn(move || send_to(&reply, probe::run(&dir).to_string()));
+                        }
                         "search" if !arg.is_empty() => {
                             let client = self.client.clone();
                             let tx = self.tx.clone();
@@ -1537,6 +2723,17 @@ impl Controller {
                             thread::spawn(move || {
                                 let r = match client.owned_playlists() {
                                     Ok(lists) => serde_json::json!({"playlists": lists}).to_string(),
+                                    Err(e) => serde_json::json!({"error": e.to_string()}).to_string(),
+                                };
+                                let _ = reply.send(r);
+                            });
+                        }
+                        // soundcloud.com's home page shelves for the panel's «Главная».
+                        "home" => {
+                            let client = self.client.clone();
+                            thread::spawn(move || {
+                                let r = match client.home() {
+                                    Ok(shelves) => serde_json::json!({"shelves": shelves}).to_string(),
                                     Err(e) => serde_json::json!({"error": e.to_string()}).to_string(),
                                 };
                                 let _ = reply.send(r);
@@ -1613,8 +2810,11 @@ impl Controller {
                 Cmd::Ended(..) => {}
                 Cmd::Loaded { what, result, reply } => self.on_loaded(what, result, reply),
                 Cmd::Related(token, result) => self.on_related(token, result),
-                Cmd::Settings(s, reply) => {
-                    let r = self.apply_settings(s);
+                Cmd::Settings(patch, reply) => {
+                    let r = match self.settings.merged(&patch) {
+                        Ok(s) => self.apply_settings(s),
+                        Err(e) => format!("error: {e}"),
+                    };
                     let _ = reply.send(r);
                 }
                 Cmd::Results(tracks) => self.results = tracks,
@@ -1692,6 +2892,7 @@ impl Controller {
     fn share_status(&self) {
         *self.shared.status.lock().unwrap() = self.status();
         *self.shared.status_json.lock().unwrap() = self.json();
+        *self.shared.now_track.lock().unwrap() = self.current().cloned();
         let cover = self.current().and_then(Track::cover);
         let changed = {
             let mut now = self.shared.cover.lock().unwrap();
@@ -1703,6 +2904,65 @@ impl Controller {
         if changed {
             web::prefetch_cover(self.shared.clone());
         }
+    }
+}
+
+fn display_widgets(s: &Settings) -> display::Widgets {
+    display::Widgets {
+        on: s.display_on,
+        list: s.display_widgets.clone(),
+        secs: u64::from(s.display_secs),
+        lat: s.display_lat,
+        lon: s.display_lon,
+    }
+}
+
+/// The speaker, for the panel's home page (read once).
+/// Planner, Google sign-in and which calendars to read, from the settings.
+fn apply_planner(s: &Settings) {
+    planner::configure_plan(planner::Plan {
+        warn: s.plan_warn,
+        due_time: s.plan_due_time,
+        brief_on: s.brief_on,
+        brief_phrase: s.brief_phrase,
+        brief_at: s.brief_at,
+        brief_days: s.brief_days.clone(),
+        target: s.plan_target_now(),
+        check_every: s.plan_check_every,
+        check_times: s.plan_check_times,
+        work_from: s.work_from,
+        work_to: s.work_to,
+        work_days: s.work_days.clone(),
+        work_mode: s.plan_mode() == "work",
+        teams: s.teams.clone(),
+        meet_minutes: s.meet_minutes,
+        meet_bot: s.meet_bot_token.clone(),
+    });
+    timer::set_face(s.timer_face);
+    google::configure(google::Config { client_id: s.g_client_id.clone(), secret: s.g_client_secret.clone(), refresh: s.g_refresh.clone() });
+    calendar::configure_google(s.g_on && !s.g_refresh.is_empty(), &s.g_read, &s.g_write, &s.g_list);
+}
+
+fn device_info() -> serde_json::Value {
+    static INFO: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+    INFO.get_or_init(|| {
+        serde_json::json!({
+            "model": stats::model(),
+            "firmware": report::firmware(),
+            "version": VERSION,
+            "dev": cfg!(feature = "dev"),
+            "display": display::Clock::detect().is_some(),
+        })
+    })
+    .clone()
+}
+
+fn login_state(token: bool, refused: bool, confirmed: bool) -> &'static str {
+    match (token, refused, confirmed) {
+        (false, ..) => "none",
+        (true, true, _) => "refused",
+        (true, false, true) => "ok",
+        (true, false, false) => "checking",
     }
 }
 
@@ -1733,6 +2993,75 @@ fn contact_names(settings: &Settings) -> Vec<String> {
         .collect()
 }
 
+/// A spoken phrase to match on: as alice.rs normalises what is heard
+/// (lowercase, «ё»→«е», no «Алиса,», no end punctuation, no «пожалуйста»).
+fn norm_phrase(s: &str) -> String {
+    alice::normalize_phrase(s)
+}
+
+/// Commands a macro may run: playback, volume, the PC and the TV. Not
+/// uninstall, update, bypass, settings or other macros — a spoken phrase
+/// must not be able to remove or reconfigure soundya.
+const MACRO_COMMANDS: [&str; 23] = [
+    "play", "playlist", "album", "likes", "recs", "myplaylist", "openpl", "pause", "resume", "toggle", "next",
+    "prev", "previous", "stop", "shuffle", "repeat", "similar", "seek", "volume", "pc", "tv", "goto", "timer",
+];
+
+/// «••••••••abcd» for the page; "" stays "".
+fn mask_tail(secret: &str) -> String {
+    if secret.is_empty() {
+        return String::new();
+    }
+    format!("••••••••{}", secret.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect::<String>())
+}
+
+/// «123456789:AA…» as @BotFather gives it.
+fn valid_bot_token(t: &str) -> bool {
+    let Some((id, key)) = t.split_once(':') else { return false };
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()) && key.len() >= 30 && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// Good enough for an invitation: one «@», a dot in the domain, no spaces.
+fn valid_email(e: &str) -> bool {
+    let Some((user, domain)) = e.split_once('@') else { return false };
+    !user.is_empty() && domain.contains('.') && !domain.starts_with('.') && !domain.ends_with('.') && !e.contains(char::is_whitespace) && !domain.contains('@')
+}
+
+/// A scenario run by a pomodoro event, without its «timer …» steps (no loop).
+fn without_timer(script: &str) -> String {
+    script.lines().filter(|l| l.split_whitespace().next() != Some("timer")).collect::<Vec<_>>().join("\n")
+}
+
+/// A script's lines, checked: every one is «wait N» or an allowed command.
+fn macro_lines(script: &str) -> Result<Vec<String>, String> {
+    let lines: Vec<String> = script
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(str::to_owned)
+        .collect();
+    if lines.len() > 50 {
+        return Err("в сценарии больше 50 строк".into());
+    }
+    for l in &lines {
+        let cmd = l.split_whitespace().next().unwrap_or("");
+        if !(cmd == "wait" || cmd == "sleep" || MACRO_COMMANDS.contains(&cmd)) {
+            return Err(format!("команда «{cmd}» в сценарии не разрешена (можно: wait, {})", MACRO_COMMANDS.join(", ")));
+        }
+    }
+    Ok(lines)
+}
+
+/// (normalized phrase, script) for every macro that has both filled in.
+fn macro_list(settings: &Settings) -> Vec<(String, String)> {
+    settings
+        .macros
+        .iter()
+        .map(|m| (norm_phrase(&m.phrase), m.script.clone()))
+        .filter(|(p, s)| !p.is_empty() && !s.trim().is_empty())
+        .collect()
+}
+
 /// Keeps sound-card errors on flash (`audio-errors.log`), with the ALSA setup,
 /// so they can be diagnosed later even after a reboot.
 fn note_audio_error(dir: &std::path::Path, device: &str, e: &str) {
@@ -1750,7 +3079,7 @@ fn note_audio_error(dir: &std::path::Path, device: &str, e: &str) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    text.push_str(&format!("{now} soundya {} device {device:?}: {e}\n", env!("CARGO_PKG_VERSION")));
+    text.push_str(&format!("{now} soundya {} device {device:?}: {e}\n", VERSION));
     if !text.contains("--- /etc/asound.conf") {
         let conf = fsx::read_string(std::path::Path::new("/etc/asound.conf")).unwrap_or_else(|| "(none)".into());
         let cards = fsx::read_string(std::path::Path::new("/proc/asound/cards")).unwrap_or_default();
@@ -1874,22 +3203,29 @@ fn daemon() {
         keyword_only: AtomicBool::new(settings.keyword_only),
         pc: AtomicBool::new(settings.pc_configured()),
         contacts: Mutex::new(contact_names(&settings)),
+        macros: Mutex::new(macro_list(&settings)),
         active: AtomicBool::new(false),
         queue: AtomicBool::new(false),
         status: Mutex::new("stopped".into()),
         status_json: Mutex::new(String::new()),
         cover: Mutex::new(None),
+        now_track: Mutex::new(None),
         bypass_log: Mutex::new(Vec::new()),
         bypass_busy: AtomicBool::new(false),
         alice_music: AtomicBool::new(false),
         airplay: airplay::AirPlay::new(settings.airplay, &settings.airplay_name, &settings.airplay_icon),
         stats: AtomicBool::new(settings.stats),
+        share_heard: AtomicBool::new(settings.share_heard),
+        heard: Mutex::new((String::new(), 0)),
         updates: update::Updates::default(),
         proxy: Mutex::new(settings.use_proxy().to_owned()),
         tv: AtomicBool::new(settings.tv_configured()),
         soundcloud: AtomicBool::new(settings.soundcloud),
         light: Mutex::new({
             eq::set(settings.eq_on, &settings.eq);
+            if !led::set_order(&settings.led_order) {
+                eprintln!("led: unknown channel order {:?}; using rgb", settings.led_order);
+            }
             led::Light::from_settings(&settings)
         }),
     });
@@ -1907,6 +3243,31 @@ fn daemon() {
     luna::run(tx.clone(), shared.clone());
     // zapret (nfqws) with the saved strategy, before anything talks to SoundCloud.
     zapret::restore(&dir, settings.active_bypass(), &settings.zapret_args);
+    // «Громкость голоса Алисы»: a volume left lowered by a crash comes back first.
+    voice::recover();
+    voice::configure(settings.alice_voice, settings.alice_voice_max);
+    // Telegram bots: messages from allowed people read out, replies by voice.
+    telegram::configure(telegram::Config::from_settings(&settings), &shared);
+    telegram::run_summary(shared.clone());
+    // Tasks and reminders (said only with the planner on).
+    planner::configure(settings.planner_on, settings.tz_offset);
+    planner::run(&dir);
+    timer::run(&dir);
+    adbkeep::configure(settings.adb_keep);
+    alice::set_tv(settings.tv_on && !settings.tv_host.trim().is_empty());
+    adbkeep::run();
+    calendar::configure(settings.cal_on, &settings.cal_url, settings.cal_remind);
+    apply_planner(&settings);
+    calendar::run(&dir, shared.clone());
+    // Bluetooth output: is the chosen device connected (only while it is switched on).
+    bt_watch(tx.clone(), settings.bt_on.then(|| settings.bt_mac.clone()));
+    // Optional panel PIN and its saved browser sessions.
+    auth::init(&dir, &settings.panel_pin);
+    // Smart Ducking: calls and notifications from devices lower soundya's music.
+    ducking::configure(ducking::Config::from_settings(&settings));
+    ducking::run(shared.clone());
+    // Bug reports queued on flash: delivered when the server answers.
+    report::run(dir.clone(), shared.clone());
     // Looks for a newer soundya on GitHub; the page offers to install it.
     update::run(shared.clone());
     // A wrong clock breaks every HTTPS site (GitHub first): set it from the web.
@@ -1919,9 +3280,18 @@ fn daemon() {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(8765);
+    // One client for the player and the browser stream: proxy and token
+    // changes from the settings reach both (they share their state).
+    let client = client_with(&settings);
     if port != 0 {
-        web::serve(port, tx.clone(), shared.clone());
+        web::serve(port, tx.clone(), shared.clone(), client.clone());
     }
+    // After install: Alice says where the panel is (once per version).
+    hello::run(&dir, shared.clone(), settings.voice_hello, settings.onboarded, port);
+    // The clock display (Mini 3, Plum, Pickle): install steps, then widgets.
+    display::configure(display_widgets(&settings), settings.display_bright, &settings);
+    display::run();
+    display::run_providers(shared.clone());
     let control_tx = tx.clone();
     let status_shared = shared.clone();
     thread::spawn(move || {
@@ -1931,15 +3301,16 @@ fn daemon() {
             thread::spawn(move || serve(conn, tx, &shared));
         }
     });
+    mark_ready();
     eprintln!(
         "soundya {} running; device {:?}, keyword only: {}, proxy: {}",
-        env!("CARGO_PKG_VERSION"),
+        VERSION,
         device(),
         settings.keyword_only,
         if settings.proxy.is_empty() { "none".into() } else { settings.masked_proxy() }
     );
     Controller {
-        client: client_with(&settings),
+        client,
         shared,
         tx,
         device: device(),
@@ -1966,6 +3337,10 @@ fn daemon() {
         net_fails: 0,
         repicked: None,
         asked: None,
+        token_checked: None,
+        source_cmd: None,
+        resume_at: None,
+        resume_saved: None,
         rng: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
@@ -1973,6 +3348,17 @@ fn daemon() {
             | 1,
     }
     .start_up(rx);
+}
+
+/// «version pid» in /run/soundya.ready once everything is up: install.sh waits
+/// for it after an update and rolls back if it does not come (or the process dies).
+fn mark_ready() {
+    let run = std::env::var("SOUNDYA_RUN").unwrap_or_else(|_| "/run".into());
+    let path = std::path::Path::new(&run).join("soundya.ready");
+    let text = format!("{} {}\n", VERSION, std::process::id());
+    if let Err(e) = std::fs::write(&path, text) {
+        eprintln!("ready: {}: {e}", path.display());
+    }
 }
 
 fn serve(conn: TcpStream, tx: Sender<Cmd>, shared: &Shared) {
@@ -2043,6 +3429,11 @@ fn main() {
             println!("{}", uninstall());
             0
         }
+        // install.sh asks every binary this; older ones print the same first line in their help.
+        "version" | "--version" | "-V" => {
+            println!("soundya {}", VERSION);
+            0
+        }
         "search" => match client().search_tracks(&rest) {
             Ok(tracks) => {
                 for t in tracks {
@@ -2082,7 +3473,8 @@ fn main() {
             }
         }
         "play" | "playlist" | "likes" | "pause" | "resume" | "toggle" | "next" | "prev" | "stop"
-        | "status" | "queue" | "shuffle" | "repeat" | "like" | "unlike" | "similar" | "recs" | "seek" | "pc" | "tv" => send(&format!("{cmd} {rest}")),
+        | "status" | "queue" | "shuffle" | "repeat" | "like" | "unlike" | "similar" | "recs" | "seek" | "pc" | "tv"
+        | "pin" | "macro" | "duck" => send(&format!("{cmd} {rest}")),
         _ => {
             println!(
                 "soundya {}\n\
@@ -2102,10 +3494,64 @@ fn main() {
                  \n«пауза», «продолжи», «следующий трек», «назад», «перемешай»,\
                  \n«поставь на повтор», «включи похожее», «лайкни», «что играет», «включи рекомендации»,\
                  \n«включи/выключи/усыпи компьютер», «открой <программу> на компьютере».",
-                env!("CARGO_PKG_VERSION")
+                VERSION
             );
             0
         }
     };
     std::process::exit(code);
+}
+
+#[cfg(test)]
+mod net_tests {
+    use super::net_level;
+
+    #[test]
+    fn music_downloading_is_not_no_connection() {
+        // The bug: the last API check failed while music played → «нет связи».
+        assert_eq!(net_level(Some(None), Some(900)), "good");
+        assert_eq!(net_level(Some(None), Some(300)), "slow");
+        assert_eq!(net_level(Some(None), Some(50)), "bad");
+        // Nothing plays and the check failed: really no connection.
+        assert_eq!(net_level(Some(None), None), "down");
+        assert_eq!(net_level(None, None), "unknown");
+        assert_eq!(net_level(Some(Some(200)), None), "good");
+        assert_eq!(net_level(Some(Some(200)), Some(100)), "bad");
+        assert_eq!(net_level(Some(Some(900)), None), "slow");
+    }
+}
+
+#[cfg(test)]
+mod email_tests {
+    #[test]
+    fn invitations_need_an_address() {
+        assert!(super::valid_email("ivan@company.ru"));
+        assert!(super::valid_bot_token("123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw"));
+        for bad in ["123456789", "abc:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw", "123:short", "123:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDs aw"] {
+            assert!(!super::valid_bot_token(bad), "{bad}");
+        }
+        assert_eq!(super::mask_tail(""), "");
+        assert!(super::mask_tail("123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw").ends_with("Dsaw"));
+        assert!(!super::mask_tail("123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw").contains("12345"), "the secret stays on the speaker");
+        for bad in ["ivan", "ivan@", "@x.ru", "ivan@x", "i van@x.ru", "a@b@c.ru", "ivan@.ru"] {
+            assert!(!super::valid_email(bad), "{bad}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod macro_tests {
+    #[test]
+    fn macros_cannot_remove_soundya() {
+        assert!(super::macro_lines("tv do открой ютуб\nwait 3000\nvolume set 4").is_ok());
+        assert!(super::macro_lines("pc wake\ntimer pomodoro").is_ok(), "«я сажусь работать» may start a pomodoro");
+        assert_eq!(super::without_timer("play lofi\ntimer pomodoro\nvolume set 3"), "play lofi\nvolume set 3", "no pomodoro loop");
+        for bad in ["uninstall", "update install", "bypass off", "macro run x", "pc do x\nuninstall"] {
+            assert!(super::macro_lines(bad).is_err(), "{bad}");
+        }
+        assert_eq!(super::login_state(true, true, true), "refused");
+        assert_eq!(super::login_state(true, false, false), "checking");
+        assert_eq!(super::login_state(false, true, false), "none");
+        assert_eq!(super::norm_phrase("Алиса, Включи вечерний режим, пожалуйста!"), "включи вечерний режим");
+    }
 }

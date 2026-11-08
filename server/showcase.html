@@ -1,0 +1,232 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>soundya · статистика</title>
+<style>
+:root{
+  --bg:#0f0e14;--surf:#1b1a22;--ink:#f3f1f9;--muted:#9a93a8;--accent:#ff5500;--accent2:#ff2f6d;
+  --sh-d:#0a0910;--sh-l:#242230;
+  --c1:#ff5500;--c2:#ff2f6d;--c3:#7b3bff;--glow:.8;--spd:24s;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;min-height:100%;font:15px/1.6 -apple-system,Segoe UI,Roboto,sans-serif;color:var(--ink);background:var(--bg)}
+/* animated mesh-gradient background */
+.bg{position:fixed;inset:0;z-index:-2;overflow:hidden;background:#0b0a10}
+.bg i{position:absolute;border-radius:50%;filter:blur(90px);opacity:var(--glow);mix-blend-mode:screen;
+  animation:float var(--spd) ease-in-out infinite}
+.bg i:nth-child(1){width:48vw;height:48vw;min-width:420px;min-height:420px;background:var(--c1);top:-12%;left:-6%}
+.bg i:nth-child(2){width:44vw;height:44vw;min-width:380px;min-height:380px;background:var(--c2);top:26%;right:-12%;animation-delay:-8s}
+.bg i:nth-child(3){width:40vw;height:40vw;min-width:360px;min-height:360px;background:var(--c3);bottom:-14%;left:22%;animation-delay:-15s}
+@keyframes float{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(6vw,-5vh) scale(1.12)}66%{transform:translate(-5vw,6vh) scale(.94)}}
+body.anim-off .bg i{animation:none}
+.dim{position:fixed;inset:0;z-index:-1;background:#0b0a10;opacity:0}
+/* neomorphism */
+.neo{background:var(--surf);border-radius:22px;box-shadow:7px 7px 16px var(--sh-d),-6px -6px 14px var(--sh-l)}
+button.neo,.icon{border:0;color:var(--ink);cursor:pointer;transition:transform .12s,box-shadow .15s,color .15s;font:inherit}
+button.neo:active,.icon:active{box-shadow:inset 4px 4px 9px var(--sh-d),inset -4px -4px 9px var(--sh-l);transform:translateY(1px)}
+/* header */
+header{position:fixed;top:0;left:0;right:0;z-index:6;display:flex;align-items:center;justify-content:space-between;padding:16px 26px;gap:12px}
+.logo{font-size:24px;font-weight:800;letter-spacing:-.03em;text-decoration:none;color:var(--ink)}
+.logo span{background:linear-gradient(120deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hbtns{display:flex;gap:12px;align-items:center}
+.icon{width:44px;height:44px;border-radius:14px;display:grid;place-items:center;color:var(--muted);background:var(--surf);box-shadow:5px 5px 12px var(--sh-d),-4px -4px 10px var(--sh-l)}
+.icon:hover{color:var(--accent)}.icon svg{width:20px;height:20px}
+main{position:relative;z-index:1}
+/* hero */
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;gap:22px;padding:92px 22px 36px;max-width:1040px;margin:0 auto}
+.count{text-align:center}
+.big{font-size:clamp(86px,18vw,200px);font-weight:800;line-height:.92;letter-spacing:-.05em;
+  background:linear-gradient(120deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent;
+  text-shadow:0 20px 80px rgba(255,85,0,.25)}
+.clbl{font-size:clamp(15px,2.4vw,20px);color:var(--ink);opacity:.92;margin-top:6px}
+.ever{color:var(--muted);font-size:14px;margin-top:8px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+@media(max-width:720px){.stats{grid-template-columns:1fr}}
+.panel{padding:14px 16px}
+.panel h2{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);font-weight:700}
+/* equal-height lists that scroll inside the card when there are many rows */
+#models,#versions{height:216px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:var(--accent) transparent;padding-right:4px}
+#models::-webkit-scrollbar,#versions::-webkit-scrollbar{width:6px}
+#models::-webkit-scrollbar-thumb,#versions::-webkit-scrollbar-thumb{background:linear-gradient(var(--accent),var(--accent2));border-radius:3px}
+#models::-webkit-scrollbar-track,#versions::-webkit-scrollbar-track{background:transparent}
+.row{display:flex;align-items:center;gap:12px;margin:5px 0}
+.row .nm{flex:1;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .ct{font-variant-numeric:tabular-nums;font-weight:700;color:var(--accent);width:32px;text-align:right}
+.meter{height:7px;border-radius:5px;background:#121118;box-shadow:inset 2px 2px 4px #0a090e,inset -1px -1px 3px #201f29;overflow:hidden;flex:1;max-width:150px}
+.meter i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,var(--accent),var(--accent2));width:0;transition:width 1.1s cubic-bezier(.2,.8,.2,1)}
+.kv{display:flex;justify-content:space-between;padding:4px 0;font-size:13.5px;border-bottom:1px solid rgba(255,255,255,.05)}
+.kv:last-child{border:0}.kv b{font-variant-numeric:tabular-nums}
+.scrolldn{display:grid;place-items:center;width:52px;height:52px;margin:2px auto 0;border-radius:50%;color:var(--accent);cursor:pointer;
+  background:var(--surf);box-shadow:5px 5px 14px var(--sh-d),-4px -4px 12px var(--sh-l);animation:bob 2.2s ease-in-out infinite;transition:color .15s}
+.scrolldn svg{width:24px;height:24px}.scrolldn:hover{color:var(--accent2)}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(6px)}}
+/* story */
+.story{position:relative;max-width:900px;margin:0 auto;padding:30px 22px 110px}
+.story>section{margin:78px 0}
+.reveal{opacity:0;transform:translateY(26px);transition:opacity .7s cubic-bezier(.2,.8,.2,1),transform .7s cubic-bezier(.2,.8,.2,1)}
+.reveal.in{opacity:1;transform:none}
+.big2{font-size:clamp(26px,4vw,38px);font-weight:800;letter-spacing:-.02em;margin:0 0 14px}
+.lead{font-size:17px;color:var(--muted);max-width:660px;margin:0}
+.steps{display:grid;gap:14px;grid-template-columns:repeat(3,1fr);margin-top:24px}
+@media(max-width:720px){.steps{grid-template-columns:1fr}}
+.step{padding:22px}.step .n{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-weight:800;color:var(--accent);margin-bottom:12px;background:var(--surf);box-shadow:inset 3px 3px 7px var(--sh-d),inset -3px -3px 7px var(--sh-l)}
+.step b{font-size:15px}.step p{color:var(--muted);margin:6px 0 0;font-size:14px}
+.feats{display:grid;gap:14px;grid-template-columns:repeat(3,1fr);margin-top:24px}
+@media(max-width:720px){.feats{grid-template-columns:1fr 1fr}}@media(max-width:460px){.feats{grid-template-columns:1fr}}
+.feat{padding:18px}.feat .fi{color:var(--accent);margin-bottom:10px}.feat .fi svg{width:24px;height:24px}
+.feat b{display:block;margin-bottom:3px}.feat span{color:var(--muted);font-size:13.5px}
+.cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px}
+.cta a{padding:13px 22px;border-radius:16px;text-decoration:none;color:var(--ink);font-weight:600;background:var(--surf);box-shadow:5px 5px 12px var(--sh-d),-4px -4px 10px var(--sh-l)}
+.cta a.primary{background:linear-gradient(120deg,var(--accent),var(--accent2));color:#fff;box-shadow:0 12px 30px rgba(255,85,0,.32)}
+code{background:#121118;padding:2px 7px;border-radius:7px;font-size:13px}
+.copycmd{position:relative;display:inline-flex;align-items:center;gap:8px;font-family:ui-monospace,Menlo,monospace;font-size:13px;color:var(--ink);background:#121118;border:0;border-radius:10px;padding:8px 13px;cursor:pointer;transition:background .15s,box-shadow .15s}
+.copycmd:hover{background:#17161f;box-shadow:inset 0 0 0 1px var(--accent)}
+.copycmd svg{width:15px;height:15px;color:var(--muted);flex:none}
+.copycmd:hover svg{color:var(--accent)}
+.copycmd .tip{position:absolute;bottom:calc(100% + 9px);left:50%;transform:translateX(-50%) translateY(4px);white-space:nowrap;
+  font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:12px;color:var(--ink);background:var(--surf);padding:6px 11px;border-radius:9px;
+  box-shadow:5px 5px 14px var(--sh-d),-3px -3px 10px var(--sh-l);opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
+.copycmd .tip::after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);border:6px solid transparent;border-top-color:var(--surf)}
+.copycmd:hover .tip{opacity:1;transform:translateX(-50%)}
+.bg i:nth-child(4){width:34vw;height:34vw;min-width:300px;min-height:300px;background:#ffb020;top:-6%;right:24%;opacity:calc(var(--glow) * .55);animation-delay:-20s}
+/* festive 100-users banner */
+.party{max-width:1040px;margin:0 auto 4px;padding:0 22px}
+.party .card{position:relative;overflow:hidden;display:flex;align-items:center;gap:12px;padding:9px 12px 9px 16px;border-radius:14px;
+  background:linear-gradient(120deg,rgba(255,85,0,.15),rgba(255,47,109,.12),rgba(123,59,255,.15));
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+.party .card::before{content:"";position:absolute;inset:0;background:linear-gradient(115deg,transparent 30%,rgba(255,255,255,.14) 48%,transparent 66%);
+  transform:translateX(-120%);animation:shine 6s ease-in-out infinite;pointer-events:none}
+@keyframes shine{0%,55%{transform:translateX(-120%)}80%,100%{transform:translateX(120%)}}
+.party .pt{flex:1;min-width:0;font-size:13.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.party .pt b{color:var(--ink);font-weight:700}
+.party a.tg{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:11px;text-decoration:none;color:#fff;font-weight:600;font-size:13px;white-space:nowrap;
+  background:linear-gradient(120deg,#2aabee,#1f93d2);box-shadow:0 6px 16px rgba(42,171,238,.3)}
+.party a.tg svg{width:15px;height:15px}
+.party .x{color:var(--muted);background:transparent;border:0;cursor:pointer;font-size:17px;line-height:1;padding:2px 4px;flex:none}
+.party .x:hover{color:var(--ink)}
+.party[hidden]{display:none}
+@media(max-width:560px){.party .pt span{display:none}}
+@media(prefers-reduced-motion:reduce){.bg i,.scrolldn,.party .card::before{animation:none}.reveal{transition:none}}
+@media(max-width:620px){header{padding:12px 16px}.logo{font-size:20px}.icon{width:38px;height:38px}}
+</style></head>
+<body>
+<div class="bg"><i></i><i></i><i></i><i></i></div>
+<div class="dim" id="dim"></div>
+<header>
+  <a class="logo" href="https://github.com/rodyatotu/soundya" target="_blank">sound<span>ya</span></a>
+  <div class="hbtns">
+    <a class="icon" href="https://t.me/+t9kgMTEpnQM3N2Vk" target="_blank" title="Telegram" aria-label="Telegram">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.9 4.3l-3.3 15.6c-.25 1.1-.9 1.37-1.83.85l-5.05-3.72-2.44 2.35c-.27.27-.5.5-1 .5l.36-5.1L17.9 6.3c.4-.36-.09-.56-.62-.2L6.9 12.6l-4.98-1.56c-1.08-.34-1.1-1.08.23-1.6l19.46-7.5c.9-.33 1.69.2 1.29 2.36z"/></svg>
+    </a>
+    <a class="icon" href="https://github.com/rodyatotu/soundya" target="_blank" title="GitHub" aria-label="GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5A11.5 11.5 0 0 0 .5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.3-1.69-1.3-1.69-1.06-.72.08-.71.08-.71 1.17.08 1.79 1.2 1.79 1.2 1.04 1.79 2.73 1.27 3.4.97.1-.76.41-1.27.74-1.56-2.55-.29-5.24-1.28-5.24-5.67 0-1.25.45-2.28 1.19-3.08-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.79 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.08 0 4.4-2.69 5.37-5.25 5.66.42.36.8 1.08.8 2.18v3.24c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5z"/></svg>
+    </a>
+  </div>
+</header>
+<main>
+  <section class="hero">
+    <div class="party" id="party" hidden>
+      <div class="card">
+        <div class="pt">🎉 <b id="partyTitle">Нас уже 100+</b><span> — спасибо, что выбираете soundya</span></div>
+        <a class="tg" href="https://t.me/+t9kgMTEpnQM3N2Vk" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.9 4.3l-3.3 15.6c-.25 1.1-.9 1.37-1.83.85l-5.05-3.72-2.44 2.35c-.27.27-.5.5-1 .5l.36-5.1L17.9 6.3c.4-.36-.09-.56-.62-.2L6.9 12.6l-4.98-1.56c-1.08-.34-1.1-1.08.23-1.6l19.46-7.5c.9-.33 1.69.2 1.29 2.36z"/></svg>
+          Telegram
+        </a>
+        <button class="x" id="partyX" aria-label="Закрыть">×</button>
+      </div>
+    </div>
+    <div class="count">
+      <div class="big" id="activeN">—</div>
+      <div class="clbl">колонок с soundya сейчас работают</div>
+      <div class="ever" id="everLine"></div>
+    </div>
+    <div class="stats">
+      <div class="neo panel"><h2>Модели колонок</h2><div id="models"></div></div>
+      <div class="neo panel"><h2>Версии</h2><div id="versions"></div></div>
+    </div>
+    <a href="#story" class="scrolldn" aria-label="Листать вниз" title="Что это за проект">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+    </a>
+  </section>
+  <section class="story" id="story">
+    <section class="reveal">
+      <h2 class="big2">Что такое soundya</h2>
+      <p class="lead">SoundCloud прямо на Яндекс&nbsp;Станции — голосом Алисы, без телефона и компьютера. <span id="leadN"></span></p>
+    </section>
+    <section class="reveal">
+      <h2 class="big2">Как это работает</h2>
+      <div class="steps">
+        <div class="neo step"><div class="n">1</div><b>Скажите Алисе</b><p>«Алиса, включи Bonobo в саундклауде»</p></div>
+        <div class="neo step"><div class="n">2</div><b>soundya ловит команду</b><p>и играет трек напрямую из SoundCloud, минуя Яндекс&nbsp;Музыку.</p></div>
+        <div class="neo step"><div class="n">3</div><b>Управляйте как удобно</b><p>голосом или из веб-панели: пауза, следующий, лайки, громкость.</p></div>
+      </div>
+    </section>
+    <section class="reveal">
+      <h2 class="big2">Что умеет</h2>
+      <div class="feats">
+        <div class="neo feat"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg></div><b>SoundCloud голосом</b><span>Рекомендации, лайки, плейлисты, поиск по голосу.</span></div>
+        <div class="neo feat"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h18a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-2"/><path d="M12 15l5 6H7l5-6z"/></svg></div><b>AirPlay</b><span>Станция становится AirPlay-колонкой для iPhone и Mac.</span></div>
+        <div class="neo feat"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg></div><b>Подсветка под музыку</b><span>Кольцо светится в такт — бас, середина, верха (Ambilight).</span></div>
+        <div class="neo feat"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></div><b>Эквалайзер</b><span>10 полос для SoundCloud и AirPlay прямо из панели.</span></div>
+        <div class="neo feat"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div><b>ПК, ТВ и Telegram</b><span>«Открой телеграм», «включи проектор», сообщения с компьютера.</span></div>
+        <div class="neo feat"><div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div><b>Обход блокировок</b><span>Встроенный zapret/zapret2 — когда SoundCloud режут по имени сайта.</span></div>
+      </div>
+    </section>
+    <section class="reveal">
+      <h2 class="big2">Поставить себе</h2>
+      <p class="lead">soundya — открытый проект. Нужен root на Станции; остальное делает установщик.</p>
+      <div class="cta"><a class="primary" href="https://github.com/rodyatotu/soundya" target="_blank">Открыть на GitHub</a></div>
+      <p style="color:var(--muted);margin-top:16px">Через Luna/YAM:
+        <button class="copycmd" id="yamcmd" data-cmd="yam install rodyatotu/soundya">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          yam install rodyatotu/soundya<span class="tip">Кликните, чтобы скопировать</span>
+        </button></p>
+    </section>
+  </section>
+</main>
+<script id="data" type="application/json">/*DATA*/</script>
+<script>
+(function(){
+  var DATA; try{ DATA=JSON.parse(document.getElementById('data').textContent); }catch(e){ DATA=null; }
+  if(!DATA){ DATA={active:87,ever:142,
+    models:[{model:'Станция Мини 2',count:31},{model:'Станция Лайт',count:29},{model:'Amlogic',count:8},{model:'Plum EVT2',count:7},{model:'Cucumber DVT2',count:5},{model:'Станция Миди',count:3}],
+    versions:[{version:'0.4.40',count:61},{version:'0.4.39',count:18},{version:'0.4.37',count:6}]}; }
+  function esc(s){return String(s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+  var $=function(s){return document.querySelector(s);};
+  (function(){var el=$('#activeN'),to=DATA.active|0,t0=null;function step(ts){if(!t0)t0=ts;var p=Math.min(1,(ts-t0)/900);el.textContent=Math.round(to*(1-Math.pow(1-p,3)));if(p<1)requestAnimationFrame(step);}requestAnimationFrame(step);})();
+  var mp=Math.max.apply(null,[1].concat(DATA.models.map(function(m){return m.count;})));
+  $('#models').innerHTML=DATA.models.map(function(m){return '<div class="row"><span class="nm">'+esc(m.model)+'</span><span class="meter"><i style="width:'+(100*m.count/mp)+'%"></i></span><span class="ct">'+m.count+'</span></div>';}).join('');
+  $('#versions').innerHTML=DATA.versions.map(function(v){return '<div class="kv"><span>'+esc(v.version)+'</span><b>'+v.count+'</b></div>';}).join('');
+  $('#everLine').textContent='всего установлено за всё время: '+DATA.ever;
+  var leadN=$('#leadN'); if(leadN) leadN.textContent='Сейчас работает на '+DATA.active+' колонках, установлена '+DATA.ever+' раз.';
+
+  // festive banner once the project passes 100 users (milestone from live count, not hardcoded)
+  var party=$('#party');
+  if(party){
+    var users=DATA.ever|0, dismissed=false;
+    try{ dismissed=localStorage.getItem('party100')==='off'; }catch(e){}
+    if(users>=100 && !dismissed){
+      $('#partyTitle').textContent='Нас уже '+(Math.floor(users/100)*100)+'+!';
+      party.hidden=false;
+    }
+    var px=$('#partyX'); if(px)px.onclick=function(){party.hidden=true;try{localStorage.setItem('party100','off');}catch(e){}};
+  }
+
+  var reduceM=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var revs=document.querySelectorAll('.reveal');
+  if(reduceM||!('IntersectionObserver' in window)){ revs.forEach(function(el){el.classList.add('in');}); }
+  else { var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}});},{threshold:.14,rootMargin:'0px 0px -8% 0px'}); revs.forEach(function(el){io.observe(el);}); }
+  addEventListener('scroll',function(){ var t=Math.min(1,scrollY/(innerHeight*0.8)); document.getElementById('dim').style.opacity=(t*0.7).toFixed(3); var sd=document.querySelector('.scrolldn'); if(sd)sd.style.opacity=(0.7*(1-t)).toFixed(2); },{passive:true});
+
+  // copy-to-clipboard command button
+  var yc=document.getElementById('yamcmd');
+  function fallbackCopy(txt){try{var ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);return true;}catch(e){return false;}}
+  if(yc){yc.onclick=function(){
+    var txt=yc.dataset.cmd,tip=yc.querySelector('.tip');
+    function done(){var old=tip.textContent;tip.textContent='Скопировано ✓';setTimeout(function(){tip.textContent=old;},1400);}
+    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(txt).then(done,function(){if(fallbackCopy(txt))done();});}
+    else if(fallbackCopy(txt))done();
+  };}
+})();
+</script>
+</body></html>

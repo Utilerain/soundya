@@ -155,6 +155,17 @@ fn mixer_value(level: i32, learnt: &[Option<u32>; 11]) -> u32 {
     learnt[level].unwrap_or(((level as u32 * 10 * 255) + 50) / 100)
 }
 
+/// For voice.rs: the mixer now, a new value, and the value of one of her levels.
+pub fn read_mixer_value() -> Option<u32> {
+    read_mixer()
+}
+pub fn write_mixer_value(value: u32) -> bool {
+    write_mixer(value.min(255))
+}
+pub fn mixer_for_level(level: i32) -> u32 {
+    mixer_value(level, &learnt())
+}
+
 /// After Alice's own «громкость N»: note which value she set.
 fn learn_later(n: i32) {
     std::thread::spawn(move || {
@@ -183,6 +194,8 @@ fn learn_later(n: i32) {
 /// with no amixer on the speaker, by pressing her buttons.
 pub fn set(target: i32) -> Result<i32, String> {
     let _one = BUSY.lock().unwrap();
+    // Alice's volume manager and the buttons make the firmware draw the level.
+    crate::led::firmware_animates();
     let target = target.clamp(0, MAX);
     // Under Luna: its volume API (Alice's volume manager, else the mixer, done
     // the way Luna knows works on this model).
@@ -298,7 +311,7 @@ const KEY_VOLUMEDOWN: u16 = 114;
 const KEY_VOLUMEUP: u16 = 115;
 
 extern "C" {
-    fn ioctl(fd: i32, request: u32, ...) -> i32;
+    fn ioctl(fd: i32, request: std::os::raw::c_ulong, ...) -> i32;
 }
 
 /// EVIOCGBIT(EV_KEY, len): which keys a device has, one bit per key code.
@@ -312,29 +325,30 @@ fn has(bits: &[u8], code: u16) -> bool {
 
 /// The input device with the volume buttons.
 fn device() -> Option<PathBuf> {
-    let by_caps = (0..10).find_map(|n| {
-        let path = PathBuf::from(format!("/dev/input/event{n}"));
-        let Ok(f) = std::fs::File::open(&path) else { return None };
-        let mut bits = [0u8; 96];
-        let got = unsafe { ioctl(f.as_raw_fd(), eviocgbit_key(bits.len() as u32), bits.as_mut_ptr()) };
-        (got > 0 && has(&bits, KEY_VOLUMEUP) && has(&bits, KEY_VOLUMEDOWN)).then_some(path)
-    });
-    by_caps.or_else(|| {
-        // Lite 2: the touch controller (aw9610x) takes the injected presses even
-        // though its advertised capabilities do not name the volume keys.
-        let dir = std::fs::read_dir("/sys/class/input").ok()?;
-        for entry in dir.flatten() {
-            let name = crate::fsx::read_string(&entry.path().join("name")).unwrap_or_default();
-            if name.trim() != "aw9610x" {
-                continue;
+    (0..10)
+        .map(|n| PathBuf::from(format!("/dev/input/event{n}")))
+        .find(|path| {
+            let Ok(f) = std::fs::File::open(path) else { return false };
+            let mut bits = [0u8; 96];
+            let got = unsafe { ioctl(f.as_raw_fd(), eviocgbit_key(bits.len() as u32) as std::os::raw::c_ulong, bits.as_mut_ptr()) };
+            got > 0 && has(&bits, KEY_VOLUMEUP) && has(&bits, KEY_VOLUMEDOWN)
+        })
+        .or_else(|| {
+            // Lite 2: the touch controller (aw9610x) takes the injected presses even
+            // though its advertised capabilities do not name the volume keys.
+            let dir = std::fs::read_dir("/sys/class/input").ok()?;
+            for entry in dir.flatten() {
+                let name = crate::fsx::read_string(&entry.path().join("name")).unwrap_or_default();
+                if name.trim() != "aw9610x" {
+                    continue;
+                }
+                let events = std::fs::read_dir(entry.path().join("event")).ok()?; // /sys/class/input/input2/event2
+                if let Some(event) = events.flatten().next() {
+                    return Some(PathBuf::from("/dev/input").join(event.file_name()));
+                }
             }
-            let events = std::fs::read_dir(entry.path().join("event")).ok()?; // /sys/class/input/input2/event2
-            if let Some(event) = events.flatten().next() {
-                return Some(PathBuf::from("/dev/input").join(event.file_name()));
-            }
-        }
-        None
-    })
+            None
+        })
 }
 
 /// struct input_event as a 32-bit program writes it: time (zero), type, code, value.
@@ -393,6 +407,7 @@ fn unhush_click() {
 /// One press of + (`up`) or −, `steps` times, without Alice's tick.
 pub fn press(up: bool, steps: u32) -> Result<(), String> {
     PRESSING.store(true, Ordering::Release);
+    crate::led::firmware_animates();
     let hushed = hush_click();
     let r = press_keys(up, steps);
     // The button reader sees them a moment later, and the last tick plays then.

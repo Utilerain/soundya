@@ -3,6 +3,7 @@
 #   sh scripts/deploy.sh soundya.local      (once soundya runs on it)
 #   sh scripts/deploy.sh 192.168.0.112      (first install, by IP)
 #   sh scripts/deploy.sh 192.168.0.112 --choose   (ask again what to set up)
+#   SOUNDYA_TAR=dist/soundya-armv7-dev.tar sh scripts/deploy.sh 192.168.0.112   (the developer build)
 #
 # On the first install it asks what to set up: SoundCloud, AirPlay, PC, TV,
 # bypass. Everything can be switched later on the settings page.
@@ -14,7 +15,7 @@ cd "$(dirname "$0")/.."
 . scripts/fresh.sh
 IP=${1:?usage: scripts/deploy.sh <speaker-ip>}
 DEV="$IP:5555"
-TAR=dist/soundya-armv7.tar
+TAR=${SOUNDYA_TAR:-dist/soundya-armv7.tar}
 [ -f "$TAR" ] || { echo "no $TAR: run sh scripts/build-mac.sh first" >&2; exit 1; }
 SIZE=$(wc -c < "$TAR" | tr -d ' ')
 
@@ -44,8 +45,8 @@ start_install() {
     # keeps running when adb disconnects.
     adb -s "$DEV" shell "cd /tmp && rm -rf soundya /tmp/soundya-install.done /tmp/soundya-install.log && \
         tar -xf soundya-armv7.tar && \
-        nohup setsid sh -c 'sh /tmp/soundya/install.sh > /tmp/soundya-install.log 2>&1; touch /tmp/soundya-install.done' \
-        </dev/null >/dev/null 2>&1 & sleep 1; [ -f /tmp/soundya-install.log ]"
+        trap '' HUP; nohup setsid sh -c 'sh /tmp/soundya/install.sh > /tmp/soundya-install.log 2>&1; touch /tmp/soundya-install.done' \
+        </dev/null >/dev/null 2>&1 & sleep 2; [ -f /tmp/soundya-install.log ]"
 }
 
 installed() {

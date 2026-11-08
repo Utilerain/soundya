@@ -25,15 +25,45 @@ use crate::{alsa::Output, sc::Kind};
 const DUCK_LEVEL: f32 = 0.2;
 const DUCK_HOLD_MS: u64 = 60_000;
 
-/// Alice activity: music is quieter while she listens or speaks.
+/// Alice activity: music is quieter while she listens or speaks. Also the
+/// level set by Smart Ducking (ducking.rs): calls, notifications, by voice.
 pub struct Duck {
     origin: Instant,
     until: AtomicU64,
+    /// Smart Ducking level in per mille of soundya's own sound (1000 = none).
+    external: std::sync::atomic::AtomicU32,
+    /// Someone listens in the browser («Слушать здесь»): SoundCloud on the
+    /// speaker fades out (AirPlay is not affected: it is not in the browser).
+    listening: AtomicBool,
 }
 
 impl Duck {
     pub fn new() -> Self {
-        Self { origin: Instant::now(), until: AtomicU64::new(0) }
+        Self {
+            origin: Instant::now(),
+            until: AtomicU64::new(0),
+            external: std::sync::atomic::AtomicU32::new(1000),
+            listening: AtomicBool::new(false),
+        }
+    }
+    /// 0.0..=1.0 of soundya's sound (not the speaker's volume, which stays the user's).
+    pub fn set_external(&self, level: f32) {
+        self.external.store((level.clamp(0.0, 1.0) * 1000.0).round() as u32, Ordering::Release);
+    }
+    pub fn set_listening(&self, on: bool) {
+        self.listening.store(on, Ordering::Release);
+    }
+    pub fn listening(&self) -> bool {
+        self.listening.load(Ordering::Acquire)
+    }
+    /// SoundCloud on the speaker: silent while it plays in a browser.
+    pub fn player_level(&self) -> f32 {
+        if self.listening() { 0.0 } else { self.level() }
+    }
+    /// What soundya's music should play at now: the lower of Alice's and Smart Ducking.
+    pub fn level(&self) -> f32 {
+        let ext = self.external.load(Ordering::Acquire) as f32 / 1000.0;
+        if self.active() { ext.min(DUCK_LEVEL) } else { ext }
     }
     fn now(&self) -> u64 {
         self.origin.elapsed().as_millis() as u64
@@ -74,7 +104,7 @@ pub enum Outcome {
     Seek(u64),
 }
 
-/// Volume ramp for ducking under Alice's voice.
+/// Volume ramp for ducking (Alice's voice, Smart Ducking).
 pub struct Gain(f32);
 
 impl Default for Gain {
@@ -84,14 +114,16 @@ impl Default for Gain {
 }
 
 impl Gain {
-    pub fn apply(&mut self, samples: &mut [i16], channels: usize, rate: u32, ducked: bool) {
-        let target = if ducked { DUCK_LEVEL } else { 1.0 };
+    /// `target`: 0..=1 of full level (Duck::level()).
+    pub fn apply(&mut self, samples: &mut [i16], channels: usize, rate: u32, target: f32) {
+        let target = target.clamp(0.0, 1.0);
         if self.0 == 1.0 && target == 1.0 {
             return;
         }
-        // 80 ms down, 300 ms back up.
-        let span = if target < self.0 { 0.08 } else { 0.3 };
-        let step = (1.0 - DUCK_LEVEL) / (rate as f32 * span);
+        // 80 ms down, 300 ms back up (for the whole range); fading out
+        // completely (music moved to the browser) takes a second, both ways.
+        let span = if target < 0.01 || (self.0 < 0.01 && target > 0.5) { 1.0 } else if target < self.0 { 0.08 } else { 0.3 };
+        let step = 1.0 / (rate as f32 * span);
         for frame in samples.chunks_exact_mut(channels.max(1)) {
             self.0 = if target < self.0 { (self.0 - step).max(target) } else { (self.0 + step).min(target) };
             for s in frame {
@@ -255,7 +287,7 @@ fn run(
         pcm.extend_from_slice(sb.samples());
         let samples = pcm.as_mut_slice();
         eq.apply(samples, channels, spec.rate);
-        gain.apply(samples, channels, spec.rate, duck.active());
+        gain.apply(samples, channels, spec.rate, duck.player_level());
         if let Err(e) = out.as_mut().unwrap().write(samples) {
             if e.kind() == std::io::ErrorKind::TimedOut && reopened < 2 {
                 // Close and reopen the card; the track goes on from the next packet.
