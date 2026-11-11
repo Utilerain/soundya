@@ -2,8 +2,14 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>soundya</title>
+<!-- «На экран Домой» on a phone: the panel opens as an app, without the browser around it. -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="soundya">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="icon" type="image/png" href="data:image/png;base64,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">
 <link rel="apple-touch-icon" href="data:image/png;base64,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">
 <meta name="theme-color" content="#ff5500">
@@ -32,7 +38,15 @@
     margin: 0; background: var(--bg); color: var(--ink);
     font: 15px/1.45 -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
   }
-  main { max-width: 600px; margin: 0 auto; padding: 20px 16px 48px; }
+  main { max-width: 600px; margin: 0 auto; padding: 20px 16px 48px;
+    /* Opened from the home screen the page goes under the notch and the home bar. */
+    padding-top: calc(20px + env(safe-area-inset-top, 0px)); padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .apphint { position: relative; margin: 0 0 12px; padding: 12px 40px 12px 14px; border-radius: 16px;
+    border: 1px solid var(--glass-edge); background: var(--card); font-size: 14px; line-height: 1.4; }
+  .apphint[hidden] { display: none; }
+  .apphint b { display: block; margin-bottom: 2px; }
+  .apphint .partyx { color: var(--ink); }
   header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 16px; gap: 12px; }
   h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
   h1 span { color: var(--accent); }
@@ -128,6 +142,12 @@
   .contact input { min-width: 0; }
   .contact .who { flex: 1.3; }
   .contact .to { flex: 1; }
+  .devrow { flex-wrap: wrap; }
+  .devrow .dname, .devrow .dhost { flex: 1 1 140px; }
+  .devrow .dtoken, .devrow .dmac { flex: 1 1 120px; }
+  .devrow .dtest { width: auto; padding: 8px 12px; }
+  .tvpick { margin-left: auto; font: inherit; font-size: 13px; color: var(--ink); background: var(--field); border: 1px solid var(--glass-edge);
+    border-radius: 999px; padding: 4px 10px; max-width: 46%; }
   .contact button { flex: none; width: 40px; padding: 8px 0; }
   #autolist select { flex: 1 1 140px; min-width: 0; appearance: auto; }
   #autolist input { flex: none; width: 5.5em; }
@@ -196,6 +216,10 @@
   .warnline { color: var(--err); }
   .modalcard { width: 100%; max-width: 440px; max-height: 85vh; overflow: auto; padding: 20px; border-radius: 18px;
     background: var(--card); color: var(--ink); box-shadow: 0 10px 40px rgba(0, 0, 0, .3); }
+  /* The card itself never scrolls (its scrollbar ran into the rounded corners); the list inside does. */
+  .modalcard { display: flex; flex-direction: column; overflow: hidden; }
+  .modalcard > ul { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    margin-right: -12px; padding-right: 12px; }
   .modalcard h2 { margin: 0 0 8px; font-size: 20px; text-transform: none; letter-spacing: 0; color: var(--ink); }
   .changes { margin: 6px 0 12px; padding-left: 20px; font-size: 14px; line-height: 1.45; }
   .changes li { margin: 4px 0; }
@@ -230,6 +254,8 @@
   .modal-card.report { max-width: 560px; max-height: 92vh; overflow: auto; }
   .modal-card .field textarea { margin-top: 4px; min-height: 56px; }
   .hint, .msg, ul.reports li, pre.notes { overflow-wrap: anywhere; }
+  .ledrow { align-items: center; flex-wrap: nowrap; }
+  .ledrow button { flex: 0 0 auto; min-width: 110px; }
   .ledrow select { flex: 1; }
   .outrow { display: flex; align-items: center; gap: 10px; }
   .outrow .seg { flex: 1; margin-top: 0; }
@@ -264,6 +290,9 @@
     display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; font-size: 12px;
     color: var(--muted); border-radius: 999px;
   }
+  /* One dot for everything: green — fine, yellow — something to look at, red — broken; a tap opens «Сервисы». */
+  .netpill.statusdot { padding: 8px; background: transparent; border: 0; }
+  .netpill.statusdot .dot { width: 10px; height: 10px; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent); }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
   .dot.good { background: #2f9e5b; } .dot.slow { background: #e0a100; } .dot.bad { background: var(--err); }
   h2.section { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line); }
@@ -345,6 +374,10 @@
   input[type=text], input[type=password], label.field select, .bypassbox select, .bypassbox textarea, ol.steps input, ol.steps select, #macroadd {
     background: var(--field); border: 1px solid var(--glass-edge); border-radius: 14px;
   }
+  /* Every list dressed like the text fields: the ring's colour check showed white system lists. */
+  select { font: inherit; color: var(--ink); background: var(--field, var(--bg)); border: 1px solid var(--glass-edge, var(--line));
+    border-radius: 14px; padding: 10px 12px; min-width: 0; }
+  select option { color: #111; }
   input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255, 106, 31, .18); }
   .bar { height: 5px; border-radius: 3px; background: var(--line); }
   .bar i { background: linear-gradient(90deg, #ff7a1a, #ff3d5a); border-radius: 3px; }
@@ -372,7 +405,8 @@
   .ambi-ring i:nth-child(1) { --n: 0; } .ambi-ring i:nth-child(2) { --n: 1; } .ambi-ring i:nth-child(3) { --n: 2; }
   .ambi-ring i:nth-child(4) { --n: 3; } .ambi-ring i:nth-child(5) { --n: 4; } .ambi-ring i:nth-child(6) { --n: 5; }
   .ambi-ring[data-mode=pulse] i { animation: ambipulse 1.1s ease-in-out infinite; }
-  #lightmode { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  #lightmode { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  @media (max-width: 560px) { #lightmode { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   #lightmode button { font-size: 13px; padding: 9px 4px; }
   .ambi-ring[data-mode=rainbow] { background: conic-gradient(#ff2a2a, #ffd22a, #2aff6a, #2ad4ff, #7b3bff, #ff2a9a, #ff2a2a);
     -webkit-mask: radial-gradient(circle, transparent 52%, #000 53%); mask: radial-gradient(circle, transparent 52%, #000 53%);
@@ -388,6 +422,15 @@
     animation: ambispin calc(1.2s * var(--spd, 1)) linear infinite; }
   .ambi-ring[data-mode=running] i { display: none; }
   @keyframes ambispin { to { transform: rotate(360deg); } }
+  .ambi-ring[data-mode=fire] i { animation: ambifire calc(.5s * var(--spd, 1)) ease-in-out infinite alternate;
+    background: conic-gradient(from calc(var(--n) * 60deg), var(--c2) 0 20deg, var(--c1) 20deg 52deg, transparent 52deg 360deg); }
+  .ambi-ring[data-mode=fire] i:nth-child(2n) { animation-duration: calc(.37s * var(--spd, 1)); }
+  .ambi-ring[data-mode=fire] i:nth-child(3n) { animation-duration: calc(.61s * var(--spd, 1)); }
+  @keyframes ambifire { 0% { opacity: calc(var(--b) * .45); } 60% { opacity: var(--b); } 100% { opacity: calc(var(--b) * .7); } }
+  .ambi-ring[data-mode=beat] i { animation: ambibeat .55s ease-out infinite; background: conic-gradient(from calc(var(--n) * 60deg), var(--c2) 0 52deg, transparent 52deg 360deg); }
+  @keyframes ambibeat { 0% { opacity: var(--b); } 100% { opacity: .1; } }
+  .ambi-ring[data-mode=spectrum] i { animation: ambihue calc(6s * var(--spd, 1)) linear infinite; }
+  @keyframes ambihue { to { filter: hue-rotate(360deg) drop-shadow(0 0 10px var(--c1)); } }
   @keyframes ambibreathe { 0%, 100% { opacity: .15; } 50% { opacity: var(--b); } }
   .ambi-ring[data-mode=eq] i { animation: ambieq .9s ease-in-out infinite alternate; }
   .ambi-ring[data-mode=eq] i:nth-child(2n) { animation-duration: .6s; } .ambi-ring[data-mode=eq] i:nth-child(3n) { animation-duration: .75s; }
@@ -430,20 +473,64 @@
   html { background: var(--page); }
   body::before, body::after { display: none; }
   .bg { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
-  .bg i { position: absolute; border-radius: 50%; filter: blur(80px); opacity: var(--bg-int); will-change: transform;
+  /* No filter: blur() on the moving blobs — it made the browser re-blur them every frame and on a
+     long page (Chrome on a Mac) parts of it came up blank while scrolling. The radial gradients
+     are soft already; only their position moves, which the GPU does for free. */
+  .bg i { position: absolute; border-radius: 50%; opacity: var(--bg-int); will-change: transform;
     animation: float calc(28s / var(--bg-speed)) ease-in-out infinite alternate; }
-  .bg i:nth-child(1) { width: 55vmax; height: 55vmax; left: -15vmax; top: -18vmax; background: radial-gradient(circle, var(--b1), transparent 66%); }
-  .bg i:nth-child(2) { width: 50vmax; height: 50vmax; right: -18vmax; top: 10vh; background: radial-gradient(circle, var(--b2), transparent 66%); animation-delay: calc(-7s / var(--bg-speed)); animation-duration: calc(34s / var(--bg-speed)); }
-  .bg i:nth-child(3) { width: 60vmax; height: 60vmax; left: 10vw; bottom: -30vmax; background: radial-gradient(circle, var(--b3), transparent 66%); animation-delay: calc(-15s / var(--bg-speed)); animation-duration: calc(40s / var(--bg-speed)); }
-  .bg i:nth-child(4) { width: 34vmax; height: 34vmax; right: 8vw; bottom: 5vh; background: radial-gradient(circle, var(--b4), transparent 66%); animation-delay: calc(-21s / var(--bg-speed)); animation-duration: calc(31s / var(--bg-speed)); }
+  .bg i:nth-child(1) { width: 55vmax; height: 55vmax; left: -15vmax; top: -18vmax; background: radial-gradient(circle, var(--b1), color-mix(in srgb, var(--b1) 45%, transparent) 30%, transparent 70%); }
+  .bg i:nth-child(2) { width: 50vmax; height: 50vmax; right: -18vmax; top: 10vh; background: radial-gradient(circle, var(--b2), color-mix(in srgb, var(--b2) 45%, transparent) 30%, transparent 70%); animation-delay: calc(-7s / var(--bg-speed)); animation-duration: calc(34s / var(--bg-speed)); }
+  .bg i:nth-child(3) { width: 60vmax; height: 60vmax; left: 10vw; bottom: -30vmax; background: radial-gradient(circle, var(--b3), color-mix(in srgb, var(--b3) 45%, transparent) 30%, transparent 70%); animation-delay: calc(-15s / var(--bg-speed)); animation-duration: calc(40s / var(--bg-speed)); }
+  .bg i:nth-child(4) { width: 34vmax; height: 34vmax; right: 8vw; bottom: 5vh; background: radial-gradient(circle, var(--b4), color-mix(in srgb, var(--b4) 45%, transparent) 30%, transparent 70%); animation-delay: calc(-21s / var(--bg-speed)); animation-duration: calc(31s / var(--bg-speed)); }
   @keyframes float {
     0% { transform: translate(0, 0) scale(1); }
     50% { transform: translate(8vw, 6vh) scale(1.12); }
     100% { transform: translate(-6vw, 10vh) scale(.94); }
   }
-  html.bg-static .bg i { animation: none; }
+  /* «Движение»: other ways for the same four spots to move — still only transform/opacity (GPU, no blur). */
+  html.bgm-aurora .bg i { animation-name: bgaurora; }
+  @keyframes bgaurora {
+    0% { transform: translate(-10vw, 0) scale(1.7, .55) rotate(-10deg); }
+    50% { transform: translate(14vw, 5vh) scale(2, .6) rotate(6deg); }
+    100% { transform: translate(-4vw, -4vh) scale(1.5, .5) rotate(-3deg); }
+  }
+  html.bgm-swirl .bg { inset: -35vmax; animation: bgswirl calc(80s / var(--bg-speed)) linear infinite; }
+  html.bgm-swirl .bg i { animation-name: bgswirlspot; }
+  @keyframes bgswirl { to { transform: rotate(360deg); } }
+  @keyframes bgswirlspot { 0% { transform: scale(1); } 100% { transform: scale(1.2) translate(4vw, 3vh); } }
+  html.bgm-pulse .bg i { animation-name: bgpulse; animation-duration: calc(9s / var(--bg-speed)); }
+  html.bgm-pulse .bg i:nth-child(2) { animation-duration: calc(11s / var(--bg-speed)); }
+  html.bgm-pulse .bg i:nth-child(3) { animation-duration: calc(13s / var(--bg-speed)); }
+  @keyframes bgpulse { 0% { transform: scale(.8); opacity: calc(var(--bg-int) * .55); } 100% { transform: scale(1.25); opacity: var(--bg-int); } }
+  html.bgm-lava .bg i { animation-name: bglava; animation-timing-function: cubic-bezier(.45, 0, .55, 1); }
+  @keyframes bglava {
+    0% { transform: translate(0, 30vh) scale(.9, 1.1); }
+    50% { transform: translate(5vw, -10vh) scale(1.15, .9); }
+    100% { transform: translate(-3vw, -35vh) scale(.95, 1.2); }
+  }
+  html.bg-static .bg, html.bg-static .bg i { animation: none; }
+  /* «#glass»: the Mac menu bar's window — the whole soundya as it is, only without the
+     page's own background: the popover's glass shows through. */
+  html.glass, html.glass body { background: transparent !important; }
+  html.glass .bg, html.glass body::before, html.glass body::after { display: none !important; }
+  /* The Mac window shows only the blocks chosen under its gear (glassPick): no tabs, nothing else asked for. */
+  html.glass:not(.glass-full) main > nav, html.glass:not(.glass-full) main > section.tab:not(#tab-home) { display: none !important; }
+  html.glass:not(.glass-full) #tab-home { display: block !important; }
+  html.glass:not(.glass-noplayer) .glasshide-player { display: none; }
+  html.glass.glass-noplayer section.player { display: none !important; }
+  html.glass:not(.glass-alarm) .widget[data-w="alarm"] { display: none !important; }
+  /* Nothing that only takes room: the switch shows where it plays, the gear chooses the blocks. */
+  html.glass #listennote, html.glass .homeedit, html.glass #tab-home .msg:empty, html.glass .msg:empty { display: none !important; }
+  html.glass #tab-home { padding-bottom: 4px; }
+  html.glass #tab-home .widget { margin-bottom: 10px; }
+  .glassbtn { display: none; }
+  html.glass .glassbtn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0;
+    border-radius: 50%; background: transparent; border: 0; color: var(--muted); }
+  .glasspick { position: fixed; top: 52px; right: 12px; z-index: 60; width: min(300px, calc(100vw - 24px)); max-height: calc(100vh - 70px);
+    overflow: auto; padding: 12px; border-radius: 16px; background: var(--solid); border: 1px solid var(--glass-edge); box-shadow: 0 12px 40px rgba(0,0,0,.45); }
+  .glasspick label { display: flex; align-items: center; gap: 8px; padding: 6px 2px; font-size: 14px; }
   html.bg-off .bg { display: none; }
-  @media (prefers-reduced-motion: reduce) { .bg i { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .bg, .bg i { animation: none !important; } }
   section, .modalcard, .modal-card, nav {
     position: relative;
     background: linear-gradient(160deg, rgba(255,255,255,.16), rgba(255,255,255,.04) 40%), var(--card);
@@ -452,6 +539,17 @@
     border-radius: 26px;
   }
   html.glass-lite { --glass-blur: 12px; }
+  /* Blank rectangles on a fast scroll (Chrome and Safari on a Mac), worse the more sections
+     are open: the browser re-blurred everything under every card on every frame of the moving
+     background, and a tall card ran out of GPU before it was drawn. The page's cards do not
+     blur what is under them now (the background is soft already); they are a little more solid
+     instead. Only the small things floating above the page (queue, dialogs) still blur. */
+  section, nav { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  section, nav { background: linear-gradient(160deg, rgba(255,255,255,.16), rgba(255,255,255,.04) 40%), var(--card-solid); }
+  :root { --card-solid: rgba(255, 255, 255, .74); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --card-solid: rgba(30, 25, 40, .66); } }
+  html[data-theme="dark"] { --card-solid: rgba(30, 25, 40, .66); }
+  html, body { overscroll-behavior-y: none; }
   /* A soft reflection along the top edge. */
   /* Edge to edge in the card's own corners (an inset shape with other corners read as a crooked plate). */
   section::before, .modal-card::before {
@@ -544,6 +642,8 @@
   .wscenes { display: flex; flex-wrap: wrap; gap: 8px; }
   .wscenes button { padding: 10px 14px; font-weight: 600; }
   .pcrow { display: grid; grid-template-columns: 96px 1fr auto; gap: 10px; align-items: center; margin: 6px 0; font-size: 14px; }
+  .pcone + .pcone { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .pctitle { display: block; font-size: 13px; color: var(--muted); font-weight: 600; margin-bottom: 2px; }
   .pcbar { height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; }
   .pcbar i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #ff7a1a, #ff3d5a); }
   .pcval { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -649,6 +749,18 @@
   .daytext { font-size: 15px; line-height: 1.5; margin: 12px 2px; }
   #planview button, #addkind button { padding: 8px 4px; font-size: 14px; }
   #tab-plans [hidden] { display: none !important; }
+  /* «Выполненные на колонке»: a quiet line to open, without the browser's triangle. */
+  details.donelist > summary { list-style: none; display: inline-block; cursor: pointer; font-size: 13px; color: var(--muted);
+    padding: 4px 0; margin: 4px 0; }
+  details.donelist > summary::-webkit-details-marker, details.donelist > summary::marker { display: none; content: ''; }
+  details.donelist > summary:hover { color: var(--accent); }
+  details.donelist[open] > summary { color: var(--ink); }
+  /* Drop-downs: our own arrow, a little in from the rounded edge (the browser's sat on the border). */
+  select:not([multiple]) { -webkit-appearance: none !important; appearance: none !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23948da0' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important; background-repeat: no-repeat !important;
+    background-position: right 16px center !important; background-size: 12px 8px !important; padding-right: 40px !important; }
+  select.tvpick, select.chipsel { background-position: right 10px center !important; background-size: 10px 7px !important; padding-right: 26px !important; }
+  select::-ms-expand { display: none; }
   ul.timeline li .tm { flex: none; width: 5.4em; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
   /* Delete: a small translucent round cross. */
   ul.timeline li button.link.del { flex: none; width: 24px; height: 24px; padding: 0; border-radius: 50%; display: grid; place-items: center;
@@ -661,9 +773,6 @@
   /* iPhone-like wheels: scroll, the middle row is the choice. */
 
   /* ---- Главная, витрины, очередь, поиск (2026-11 redesign) ---- */
-  .statusrow { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; margin-bottom: 12px; border-radius: 18px; cursor: pointer;
-    background: color-mix(in srgb, var(--ink) 5%, transparent); border: 1px solid var(--line); }
-  .statusrow:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
   .spill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 13px;
     background: var(--field, var(--bg)); border: 1px solid var(--glass-edge); white-space: nowrap; }
   .spill small { color: var(--muted); }
@@ -728,6 +837,13 @@
   .qpop .qhead { display: flex; justify-content: space-between; align-items: baseline; margin: 0 4px 6px; }
   .qpop .qhead small { color: var(--muted); }
   .qpop ul.list { margin: 0; }
+  /* One scroll in the queue, not two (the list had its own inside the popup), and never sideways. */
+  .qpop { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+  .qpop ul.queue { max-height: none; overflow: visible; }
+  .qpop .qhead { position: sticky; top: -10px; z-index: 1; padding: 10px 4px 6px; margin: -10px 0 6px; background: inherit; }
+  /* No scrollbars anywhere (asked for): wheel, trackpad and finger scroll as before. */
+  * { scrollbar-width: none; }
+  ::-webkit-scrollbar { display: none; width: 0; height: 0; }
   /* Search inside the player: a small magnifier top right; the field and results open in place. */
   .psearchbtn { position: absolute; top: 12px; right: 12px; z-index: 2; width: 32px; height: 32px; padding: 0; border-radius: 50%;
     color: var(--muted); background: color-mix(in srgb, var(--ink) 6%, transparent); border: 0; }
@@ -799,11 +915,12 @@
   .addline input { flex: 1; min-width: 0; }
   .addline .addbtn { width: 44px; flex: none; padding: 0; font-size: 20px; border-radius: 14px; }
   /* The add form: one line until it is used. */
-  #planaddbox:not(.open) > :not(.addline) { display: none !important; }
+  #planaddbox:not(.open) > :not(.addline):not(.msg) { display: none !important; }
   .btnow { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 16px; margin: 8px 0;
     background: color-mix(in srgb, #2a8cff 10%, transparent); border: 1px solid color-mix(in srgb, #2a8cff 35%, transparent); }
   .btnow[hidden], #btactions[hidden] { display: none; }
   label.switch.mini { margin: 0; }
+  .widget.alarmoff { display: none !important; }
   .bticon { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: #2a8cff; color: #fff; flex: none; }
   .bticon svg { width: 18px; height: 18px; }
   .bttext { flex: 1; min-width: 0; } .bttext small { display: block; color: var(--muted); font-size: 12px; }
@@ -865,6 +982,9 @@
   #gcals .check { display: flex; margin: 4px 0; }
   #tab-plans .row input[type=date], #tab-plans .row input[type=time], #tab-plans .row select { flex: 1 1 130px; min-width: 0; width: auto; appearance: auto; }
   .palettes { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 6px; }
+  #bgmotion { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  #bgmotion button { font-size: 13px; padding: 9px 4px; }
+  @media (max-width: 560px) { #bgmotion { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   .palettes button { height: 44px; border-radius: 14px; border: 2px solid transparent; padding: 0; }
   .palettes button.on { border-color: var(--ink); }
 </style>
@@ -875,10 +995,13 @@
   <header>
     <h1>sound<span>ya</span></h1>
     <div class="headright">
-      <button class="netpill" id="netpill" onclick="openSettings('net')" title="Соединение с SoundCloud">
-        <i class="dot" id="netdot"></i><span id="nettext">сеть…</span>
+      <button class="netpill statusdot" id="netpill" onclick="openStatus()" title="Состояние" aria-label="Состояние">
+        <i class="dot" id="netdot"></i><span id="nettext" hidden></span>
       </button>
       <div class="state" id="state">…</div>
+      <button class="glassbtn" id="glassbtn" onclick="toggleGlassPick()" title="Что показывать в этом окне" aria-label="Что показывать в этом окне">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+      </button>
     </div>
   </header>
 
@@ -948,10 +1071,15 @@
 
   <div class="party" id="party" hidden>
     <div class="partytext">🎉 <b id="partytitle"></b> Спасибо, что пользуетесь soundya и рассказываете о ней друзьям!</div>
-    <a class="partytg" href="https://t.me/+t9kgMTEpnQM3N2Vk" target="_blank" rel="noopener" onclick="closeParty()">Сообщество в Telegram</a>
+    <a class="partytg" href="https://t.me/+ftjTac-KQkgxY2E0" target="_blank" rel="noopener" onclick="closeParty()">Сообщество в Telegram</a>
     <button class="partyx" onclick="closeParty()" aria-label="Закрыть">×</button>
   </div>
-  <button class="updbanner on" id="loginwarn" hidden onclick="openSettings('account')">Вход в SoundCloud устарел — лайки и плейлисты недоступны. Обновить вход</button>
+  <div class="apphint" id="apphint" hidden>
+    <b>soundya — приложением на телефоне</b>
+    <span id="apphinttext"></span>
+    <button class="partyx" onclick="closeAppHint()" aria-label="Скрыть">×</button>
+  </div>
+  <button class="updbanner on" id="loginwarn" hidden onclick="openSettings('account')">Вход в SoundCloud устарел — лайки и плейлисты недоступны. Обновить вход один раз — дальше он продлевается сам</button>
   <button class="updbanner" id="updbanner" onclick="openSettings('speaker', 'updsection')"></button>
 
   <nav>
@@ -964,7 +1092,7 @@
 
   <section class="tab" id="tab-remote">
     <div class="widget bigremote" data-remote>
-      <div class="whead"><b>Пульт телевизора</b><button class="pill" onclick="openSettings('devices', 'tvsection')">Настройки</button></div>
+      <div class="whead"><b>Пульт телевизора</b><select class="tvpick" aria-label="Какой телевизор" hidden onchange="pickTv(this.value)"></select><button class="pill" onclick="openSettings('devices', 'tvsection')">Настройки</button></div>
       <div class="wremote">
         <div class="dpad">
           <button data-k="up" aria-label="Вверх"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
@@ -1029,10 +1157,9 @@
         </div>
       </div>
       <p class="hint" id="addhint"></p>
-
+      <div class="msg" id="planmsg"></div>
     </div>
-    <div class="msg" id="planmsg"></div>
-    <details><summary class="hint">Выполненные на колонке</summary><ul class="list plans" id="plandone"></ul></details>
+    <details class="donelist"><summary>Выполненные на колонке</summary><ul class="list plans" id="plandone"></ul></details>
 
     <details class="psect"><summary>Настройки планировщика</summary>
     <label class="switch"><input type="checkbox" id="planon" onchange="savePlanner()"><span><b>Планировщик soundya</b></span></label>
@@ -1047,17 +1174,23 @@
       <select id="plandue"><option value="720">в 12:00</option><option value="900">в 15:00</option><option value="1080">в 18:00</option>
         <option value="1200">в 20:00</option><option value="1380">в 23:00</option><option value="1440">без времени (не предупреждать)</option></select>
     </label>
-    <label class="switch"><input type="checkbox" id="briefon"><span><b>Утренняя сводка по времени</b>
-      <small>Алиса сама расскажет расписание, задачи и сроки на день.</small></span></label>
-    <label class="switch"><input type="checkbox" id="briefphrase"><span><b>Сводка по фразе «Алиса, доброе утро»</b>
-      <small>Пока выключено, «доброе утро» остаётся Алисе.</small></span></label>
-    <div class="row">
-      <input type="time" id="briefat" value="08:00">
-      <select id="briefdays"><option value="all">Каждый день</option><option value="weekdays">По будням</option></select>
-    </div>
     <div class="row"><button class="primary" onclick="savePlanSettings()">Сохранить</button></div>
     <div class="msg" id="plansetmsg"></div>
+    </details>
 
+    <details class="psect"><summary>Сводка</summary>
+    <p class="hint">Колонка расскажет задачи на день — сначала что сделать и к какому сроку, потом встречи из календаря.
+      Если утро после будильника уже рассказало планы, сводка в этот день молчит.</p>
+    <label class="switch"><input type="checkbox" id="briefon"><span><b>Сводка по времени</b>
+      <small>Каждый день в выбранное время.</small></span></label>
+    <div class="row">
+      <input type="time" id="briefat" value="08:00" aria-label="Время сводки">
+      <select id="briefdays" aria-label="Дни"><option value="all">Каждый день</option><option value="weekdays">По будням</option></select>
+    </div>
+    <label class="switch"><input type="checkbox" id="briefphrase"><span><b>Сводка по фразе «Алиса, доброе утро»</b>
+      <small>Пока выключено, «доброе утро» остаётся Алисе. «Какие у меня сегодня планы» работает всегда.</small></span></label>
+    <div class="row"><button class="primary" onclick="savePlanSettings('briefmsg')">Сохранить</button></div>
+    <div class="msg" id="briefmsg"></div>
     </details>
     <details class="psect"><summary>Google Календарь и Задачи <span class="chip" id="gchip"></span></summary>
     <p class="hint" id="gstate"></p>
@@ -1165,14 +1298,12 @@
   </section>
 
   <section class="tab on" id="tab-home">
-    <div class="statusrow" id="statusrow" role="button" tabindex="0" onclick="openStatus()" onkeydown="if (event.key === 'Enter') openStatus()"
-      title="Сервисы и устройства"></div>
     <div class="widget" data-w="weather">
       <div class="whead"><b>Погода</b><span class="hint" id="wcity"></span></div>
       <div id="wweather" class="wwx"><p class="hint">Загружаю…</p></div>
     </div>
     <div class="widget" data-w="remote">
-      <div class="whead"><b>Пульт ТВ</b><button class="pill" onclick="openSettings('devices')">Как голосом</button></div>
+      <div class="whead"><b>Пульт ТВ</b><select class="tvpick" aria-label="Какой телевизор" hidden onchange="pickTv(this.value)"></select><button class="pill" onclick="openSettings('devices')">Как голосом</button></div>
       <div class="wremote">
         <div class="dpad">
           <button data-k="up" aria-label="Вверх"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
@@ -1263,6 +1394,16 @@
       <button data-bg="static" role="radio">Без движения</button>
       <button data-bg="off" role="radio">Простой</button>
     </div>
+    <div id="bgmotionbox">
+      <div class="field">Движение</div>
+      <div class="seg" id="bgmotion" role="radiogroup">
+        <button data-motion="float" role="radio">Плавание</button>
+        <button data-motion="aurora" role="radio">Сияние</button>
+        <button data-motion="swirl" role="radio">Вихрь</button>
+        <button data-motion="pulse" role="radio">Дыхание</button>
+        <button data-motion="lava" role="radio">Лава-лампа</button>
+      </div>
+    </div>
     <div class="field">Палитра</div>
     <div class="palettes" id="bgpal"></div>
     <label class="field">Скорость <b id="bgspeedv"></b>
@@ -1351,10 +1492,17 @@
         <li>Откройте <b>soundcloud.com</b> на компьютере и войдите в аккаунт.</li>
         <li>Откройте инструменты разработчика: <b>Cmd+Option+I</b> (Mac) или <b>F12</b>.</li>
         <li>Вкладка <b>Application</b> (в Safari — <b>Storage</b>) → <b>Cookies</b> → <code>https://soundcloud.com</code>.</li>
-        <li>Найдите строку <code>oauth_token</code>, скопируйте значение (вида <code>2-123456-…</code>) и вставьте ниже.</li>
+        <li>Найдите строку <code>oauth_token</code>, скопируйте значение (длинное, начинается с <code>eyJ</code>) и вставьте в первое поле.</li>
+        <li>Там же строку <code>oauth_refresh_token</code> — во второе. С ней колонка сама продлевает вход каждый день:
+          SoundCloud теперь даёт <code>oauth_token</code> только на сутки.</li>
       </ol></div>
+      <p class="hint">Лучше войдите на soundcloud.com в <b>приватном окне</b>, скопируйте обе строки и закройте окно,
+        <b>не выходя</b> из аккаунта: продлевать вход тогда будет только колонка, и браузер её не перебьёт.</p>
       <div class="row">
         <input type="password" id="token" placeholder="oauth_token" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="row">
+        <input type="password" id="screfresh" placeholder="oauth_refresh_token" autocomplete="off" spellcheck="false">
       </div>
       <div class="row">
         <button class="primary" onclick="login()">Войти</button>
@@ -1366,11 +1514,19 @@
         <button onclick="logout()">Выйти</button>
       </div>
       <div class="notice warn" id="relogin" hidden>
-        <b>Вход в SoundCloud устарел.</b> SoundCloud больше не принимает сохранённый токен (вы вышли на сайте или он
-        истёк). Поиск и музыка работают, а лайки, плейлисты и рекомендации — нет. Возьмите новый <code>oauth_token</code>
-        так же, как в первый раз, и вставьте сюда — остальные настройки не изменятся.
+        <b>Вход в SoundCloud устарел.</b> <span id="reloginwhy"></span> Поиск и музыка работают, а лайки, плейлисты и
+        рекомендации — нет. Возьмите <code>oauth_token</code> и <code>oauth_refresh_token</code> так же, как в первый раз
+        (лучше из приватного окна), и вставьте сюда — остальные настройки не изменятся. Дальше колонка будет продлевать вход сама.
         <div class="row"><input type="password" id="token2" placeholder="новый oauth_token" autocomplete="off" spellcheck="false"></div>
+        <div class="row"><input type="password" id="screfresh2" placeholder="oauth_refresh_token" autocomplete="off" spellcheck="false"></div>
         <div class="row"><button class="primary" onclick="relogin()">Обновить вход</button></div>
+      </div>
+      <div class="notice" id="renewbox" hidden>
+        <span id="renewtext"></span>
+        <div id="renewform">
+          <div class="row"><input type="password" id="screfresh3" placeholder="oauth_refresh_token" autocomplete="off" spellcheck="false"></div>
+          <div class="row"><button class="primary" onclick="saveRefresh()">Продлевать сам</button></div>
+        </div>
       </div>
     </div>
     <div class="msg" id="loginmsg"></div>
@@ -1379,7 +1535,7 @@
     </div>
     <div class="sub" data-sub="speaker">
     <div class="social">
-      <a class="tg" href="https://t.me/+t9kgMTEpnQM3N2Vk" target="_blank" rel="noopener" title="Новости, помощь и сообщество soundya">
+      <a class="tg" href="https://t.me/+ftjTac-KQkgxY2E0" target="_blank" rel="noopener" title="Новости, помощь и сообщество soundya">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 0a12 12 0 1 0 0 24 12 12 0 0 0 0-24Zm5.56 8.16-1.97 9.3c-.15.66-.54.82-1.09.51l-3-2.21-1.45 1.4c-.16.16-.3.3-.61.3l.21-3.05 5.56-5.02c.24-.21-.05-.33-.38-.12l-6.87 4.33-2.96-.93c-.64-.2-.66-.64.14-.95l11.57-4.46c.54-.2 1.01.13.85.9Z"/></svg>
         Telegram</a>
       <a class="gh" href="https://github.com/rodyatotu/soundya" target="_blank" rel="noopener" title="Исходный код и релизы soundya">
@@ -1415,6 +1571,18 @@
       <button data-music="yandex" role="radio">Яндекс Музыка</button>
     </div>
     <p class="hint" id="musichint"></p>
+    <div class="field">Будильник</div>
+    <div class="seg" id="alarmkind" role="radiogroup">
+      <button data-alarm="own" role="radio">soundya</button>
+      <button data-alarm="alice" role="radio">Стандартный</button>
+    </div>
+    <p class="hint" id="alarmhint"></p>
+    <div id="alarmvolbox">
+      <div class="field">Громкость будильника: <span id="alarmvolv"></span></div>
+      <input type="range" id="alarmvol" min="1" max="10" step="1" value="5" oninput="$('alarmvolv').textContent = this.value" onchange="saveAlarmVolume()">
+      <label class="check"><input type="checkbox" id="alarmlouder" onchange="saveAlarmVolume()"><span>Становиться громче, если не встаю<br>
+        <span class="hint">Каждый круг — на одно деление громче, до 10. Выключено — всё время одна громкость.</span></span></label>
+    </div>
     <input type="checkbox" id="keyword" hidden>
     <button class="link bugbtn" onclick="openReport('yandex_music')">Сообщить об ошибке</button>
     <label class="check">
@@ -1569,6 +1737,9 @@
       <button data-mode="rainbow" role="radio">Радуга</button>
       <button data-mode="breathe" role="radio">Дыхание</button>
       <button data-mode="running" role="radio">Бегущий огонь</button>
+      <button data-mode="fire" role="radio">Огонь</button>
+      <button data-mode="beat" role="radio">Вспышки</button>
+      <button data-mode="spectrum" role="radio">Спектр</button>
     </div>
     <p class="hint" id="lightmodehint"></p>
     <div class="field">Палитра</div>
@@ -1607,9 +1778,19 @@
       <label class="field">Каждый — <b id="dispsecv"></b> с
         <input type="range" id="dispsec" min="3" max="60" step="1" class="range" oninput="$('dispsecv').textContent = this.value" onchange="saveDisp()">
       </label>
-      <label class="field">Яркость <b id="dispbrv"></b>
-        <input type="range" id="dispbr" min="10" max="100" step="5" class="range" oninput="$('dispbrv').textContent = this.value + '%'" onchange="saveDisp()">
-      </label>
+      <label class="switch"><input type="checkbox" id="displight" onchange="saveDisp()"><span><b>Своя яркость днём и ночью</b></span></label>
+      <p class="hint" id="displighthint"></p>
+      <div id="displightbox">
+        <label class="field">Днём <b id="dispbrv"></b>
+          <input type="range" id="dispbr" min="5" max="100" step="5" class="range" oninput="$('dispbrv').textContent = this.value + '%'" onchange="saveDisp()">
+        </label>
+        <label class="field">Ночью <b id="dispnbv"></b>
+          <input type="range" id="dispnb" min="5" max="100" step="5" class="range" oninput="$('dispnbv').textContent = this.value + '%'" onchange="saveDisp()">
+        </label>
+        <label class="field">Ночь — с и до
+          <div class="row"><input type="time" id="dispnfrom" onchange="saveDisp()"><input type="time" id="dispnto" onchange="saveDisp()"></div>
+        </label>
+      </div>
       <div class="row"><input type="text" id="dispcity" placeholder="Город для погоды"><button onclick="findCity()">Найти</button></div>
       <div class="row"><button onclick="dispTest()">Проверить прерывание</button></div>
       <div class="msg" id="dispmsg"></div>
@@ -1645,6 +1826,9 @@
       </div>
       <p class="hint">Или впишите данные вручную ниже (Windows: программа <code>pc/install.cmd</code> из репозитория покажет их).</p>
     </div>
+    <label class="field">Имя — как звать голосом (если компьютеров несколько)
+      <input type="text" id="pcname" placeholder="например: ноутбук" autocomplete="off">
+    </label>
     <label class="field">Адрес компьютера
       <input type="text" id="pchost" placeholder="192.168.1.50" autocomplete="off" spellcheck="false">
     </label>
@@ -1654,12 +1838,36 @@
     <label class="field">MAC-адрес — чтобы включать компьютер
       <input type="text" id="pcmac" placeholder="AA:BB:CC:DD:EE:FF" autocomplete="off" spellcheck="false">
     </label>
+    <div class="field">Ещё компьютеры
+      <p class="hint">У каждого — своё имя: «Алиса, усыпи ноутбук», «выключи компьютер в спальне». Без имени — первый.
+        Ключ показывает приложение soundya на том компьютере.</p>
+      <div id="pcsmore"></div>
+      <button class="ghost" onclick="addDev('pc')">+ Добавить компьютер</button>
+    </div>
     <div class="field">Контакты Telegram
       <p class="hint">Для «напиши контакту в телеграм …». Слева — как вы называете человека, через запятую:
         <i>контакт, контакту, контакта</i>. Справа — <code>@ник</code> или номер телефона.</p>
       <div id="contacts"></div>
       <button class="ghost" onclick="addContact()" id="addcontact">+ Добавить контакт</button>
     </div>
+    <div class="field">Какие команды выполняет soundya
+      <p class="hint">Выключенное остаётся Алисе: например, выключение компьютера или окна через Home Assistant.
+        Окна, шторы, свет и прочий умный дом без слов «на компьютере» всегда остаются Алисе.</p>
+      <label class="switch"><input type="checkbox" id="pcpower"><span><b>Питание</b>
+        <small>«включи / выключи / усыпи / перезагрузи компьютер»</small></span></label>
+      <label class="switch"><input type="checkbox" id="pcapps"><span><b>Программы и окна</b>
+        <small>«открой стим», «закрой хром»</small></span></label>
+      <label class="switch"><input type="checkbox" id="pctg"><span><b>Telegram</b>
+        <small>«напиши маме в телеграм …», сообщения контактам</small></span></label>
+      <label class="switch"><input type="checkbox" id="pcsearch"><span><b>Поиск и заметки</b>
+        <small>«загугли …», «запиши в заметки …»</small></span></label>
+      <label class="switch"><input type="checkbox" id="pcplain"><span><b>Без слов «на компьютере»</b>
+        <small>Выключите — и на компьютер пойдут только фразы, где он назван: «открой стим на компьютере»</small></span></label>
+    </div>
+    <label class="field">Всегда оставлять Алисе
+      <input type="text" id="pckeep" placeholder="например: окно, выключи компьютер, термостат" autocomplete="off">
+      <small class="hint">Слова и фразы через запятую: команды с ними soundya не трогает.</small>
+    </label>
     <div class="row">
       <button onclick="testPc()" id="pctestbtn">Проверить связь</button>
       <button onclick="pcMetrics()">Состояние ПК</button>
@@ -1687,15 +1895,30 @@
     <p class="hint">Голосом: «Алиса, включи музыку в наушниках», «верни музыку на колонку». В плеере — значок Bluetooth в «Где играет».</p>
 
     <h2 class="section" id="tvsection">Телевизор / проектор</h2>
-    <p class="hint">Android TV голосом: «включи проектор», «открой ютуб на проекторе», «найди фильм дюна на телевизоре»,
+    <p class="hint">Android TV голосом: «включи проектор», «открой ютуб на проекторе», «найди фильм дюна на телевизоре» (сам включит телевизор),
       «включи на ютубе котиков на проекторе», «пауза на проекторе», «сделай громче на телевизоре».
       На телевизоре: «Настройки» → «Об устройстве» → 7 раз нажмите на «Сборка», затем в «Для разработчиков» включите
       «Отладку по USB» (и «Отладку по сети», если такой пункт есть). Адрес — в «Сеть» → ваша сеть.</p>
+    <label class="field">Имя — как звать голосом (если телевизоров несколько)
+      <input type="text" id="tvname" placeholder="например: гостиная" autocomplete="off">
+    </label>
     <label class="field">Адрес телевизора
       <input type="text" id="tvhost" placeholder="192.168.0.50" autocomplete="off" spellcheck="false">
     </label>
+    <div class="field">Ещё телевизоры и проекторы
+      <p class="hint">У каждого — своё имя: «Алиса, выключи телевизор в спальне», «открой ютуб на кухне»,
+        «Алиса, пульт спальня». Пульт на панели переключается вверху, рядом с его названием.</p>
+      <div id="tvsmore"></div>
+      <button class="ghost" onclick="addDev('tv')">+ Добавить телевизор</button>
+    </div>
     <div class="row">
       <button class="primary" onclick="testTv()" id="tvtestbtn">Сохранить и подключить</button>
+    </div>
+    <div class="field">Поиск фильмов
+      <p class="hint">«Алиса, найди фильм Колобок на телевизоре»: телевизор включится и найдёт фильм в выбранном приложении.
+        Если приложение не примет поиск — откроется общий поиск телевизора. У каждого телевизора — своё.</p>
+      <div id="tvsearch"></div>
+      <div class="msg" id="tvsearchmsg"></div>
     </div>
     <label class="check">
       <input type="checkbox" id="remotetab" onchange="saveRemoteTab()">
@@ -2149,6 +2372,12 @@
       </div>
     </div>
   </div>
+  <div class="glasspick" id="glasspick" hidden>
+    <b>Что показывать в этом окне</b>
+    <p class="hint">Только для этого Mac. Выключенное не загружается с колонки.</p>
+    <div id="glasslist"></div>
+    <label><input type="checkbox" id="glassfull"><span>Вся панель с вкладками</span></label>
+  </div>
 </main>
 
 <div class="modal" id="updmodal" role="dialog" aria-modal="true" aria-labelledby="updmodaltitle" hidden>
@@ -2209,10 +2438,30 @@
   </div>
 </div>
 <script>
+// The Mac app's menu bar window opens the page as «/#glass»: no background of its own,
+// and only the blocks chosen under its gear (kept in this Mac's WebKit storage).
+const GLASS = location.hash === '#glass';
+if (GLASS) document.documentElement.classList.add('glass');
+const GLASS_DEFAULT = { player: true, show: ['scenes'], full: false };
+function glassPrefs() {
+  try { return Object.assign({}, GLASS_DEFAULT, JSON.parse(localStorage.getItem('soundya-glass') || '{}')); } catch (e) { return Object.assign({}, GLASS_DEFAULT); }
+}
+function glassApply() {
+  if (!GLASS) return;
+  const g = glassPrefs();
+  document.documentElement.classList.toggle('glass-full', !!g.full);
+  document.documentElement.classList.toggle('glass-noplayer', !g.player);
+  document.documentElement.classList.toggle('glass-alarm', g.show.includes('alarm'));
+}
+glassApply();
+</script>
+<script>
 
 const $ = id => document.getElementById(id);
 let settings = { proxy: '', keyword_only: false, token: '' };
 let settingsLoaded = false;
+// The defaults above stand in until the speaker's first status: nothing is loaded off them.
+let statusIn = false;
 let queueSig = '';
 const ICON_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5.6v12.8a.6.6 0 0 0 .92.5l9.6-6.4a.6.6 0 0 0 0-1L8.92 5.1A.6.6 0 0 0 8 5.6z"/></svg>';
 const ICON_PAUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 5h3.4v14H7zM13.6 5H17v14h-3.4z"/></svg>';
@@ -2228,6 +2477,9 @@ function mmss(ms) {
 
 function show(el, text, isErr) {
   const err = isErr ?? /^(error|timeout|nothing found)/i.test(text);
+  // A bare «OK» says nothing the player itself does not show: no green «OK» left on the page.
+  // Nor the player's own replies («OK playing: … [0:00/4:12] (1/322)», «OK paused», «OK 1:23»): the player shows them.
+  if (!err && /^\s*ok(\.?\s*$|\s+(playing|paused|stopped)\b|\s+\d+:\d\d)/i.test(text)) { el.className = 'msg'; el.textContent = ''; return; }
   el.textContent = text.replace(/^(error|ok):\s*/i, '');
   el.className = 'msg ' + (err ? 'err' : 'ok');
 }
@@ -2478,7 +2730,6 @@ function renderNet(n) {
   const labels = { good: 'хорошее', slow: 'медленное', bad: 'плохое', down: 'нет связи', unknown: 'проверяю…' };
   const short = { good: 'сеть ок', slow: 'сеть медленная', bad: 'сеть плохая', down: 'нет связи', unknown: 'сеть…' };
   const cls = { good: 'good', slow: 'slow', bad: 'bad', down: 'bad' }[level] || '';
-  $('netdot').className = 'dot ' + cls;
   $('nettext').textContent = short[level];
   $('netverdict').textContent = labels[level];
   $('netverdict').className = cls;
@@ -2518,6 +2769,9 @@ const LIGHT_HINTS = {
   rainbow: 'Радуга медленно вращается, громкая музыка делает её ярче.',
   breathe: 'Кольцо спокойно дышит цветом «Тихо».',
   running: 'Огонёк с хвостом бежит по кругу.',
+  fire: 'Кольцо мерцает как пламя из двух цветов и разгорается на басе.',
+  beat: 'Вспышка цвета «Громко» на каждом ударе баса, между ними — тихий «Тихо».',
+  spectrum: 'Цвет сам следует за музыкой: бас — тёплый, звонкое — холодный; громче — ярче.',
 };
 let lightMode = 'solid';
 function renderLight(s) {
@@ -2789,7 +3043,7 @@ async function loadMacros() {
     run.title = 'Запустить'; run.onclick = async e => { e.stopPropagation(); show($('macromsg'), await post('/api/cmd', 'macro run ' + m.phrase)); };
     run.className = 'mrun'; run.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>';
     const del = document.createElement('button'); del.className = 'link sdel'; del.textContent = '✕'; del.title = 'Удалить';
-    del.onclick = async e => { e.stopPropagation(); if (!confirm('Удалить сценарий «' + m.phrase + '»?')) return; show($('macromsg'), await post('/api/cmd', 'macro del ' + m.phrase)); loadMacros(); };
+    del.onclick = async e => { e.stopPropagation(); show($('macromsg'), await post('/api/cmd', 'macro del ' + m.phrase)); loadMacros(); };
     const right = document.createElement('span'); right.append(run, del);
     const kinds = [...new Set(m.script.split('\n').map(x => x.trim()).filter(Boolean).map(l => stepGroup(parseLine(l).kind)))];
     const icons = document.createElement('span'); icons.className = 'micons'; icons.innerHTML = kinds.map(k => `<i class="${k}">${STEP_ICON[k]}</i>`).join('');
@@ -2799,6 +3053,46 @@ async function loadMacros() {
       macroSteps = m.script.split('\n').map(x => x.trim()).filter(Boolean).map(parseLine); renderSteps();
     }, '', right));
   }
+}
+// «Поиск фильмов»: per TV (by its address) the app to search in; '' — the TV's own search.
+const tvSearchApps = {};
+function renderTvSearch(st) {
+  const box = $('tvsearch'), map = st.tv_search || {};
+  const tvs = [];
+  if ((st.tv_host || '').trim()) tvs.push({ host: st.tv_host.trim(), label: st.tv_name || 'Телевизор' });
+  for (const t of st.tvs_more || []) if ((t.host || '').trim()) tvs.push({ host: t.host.trim(), label: t.name || t.host });
+  box.replaceChildren();
+  if (!tvs.length) { const p = document.createElement('p'); p.className = 'hint'; p.textContent = 'Сначала добавьте телевизор выше.'; box.append(p); return; }
+  for (const t of tvs) {
+    const row = document.createElement('div'); row.className = 'row devrow';
+    const name = document.createElement('b'); name.textContent = t.label;
+    const sel = document.createElement('select'); sel.className = 'tvsearchapp'; sel.dataset.host = t.host;
+    const list = tvSearchApps[t.host];
+    const cur = map[t.host] || '';
+    const opts = [['', 'Общий поиск телевизора']];
+    const pkgs = list ? [...list.apps].sort((x, y) => (list.names[x] || x).localeCompare(list.names[y] || y, 'ru')) : [];
+    if (cur && !pkgs.includes(cur)) pkgs.unshift(cur);
+    for (const p of pkgs) opts.push([p, list && list.names[p] ? list.names[p] : p]);
+    sel.replaceChildren(...opts.map(([v, l]) => { const o = document.createElement('option'); o.value = v; o.textContent = l; return o; }));
+    sel.value = cur;
+    sel.onchange = saveTvSearch;
+    const b = document.createElement('button'); b.className = 'ghost'; b.textContent = list ? 'Обновить список' : 'Загрузить приложения';
+    b.onclick = async () => {
+      busy($('tvsearchmsg'), `Спрашиваю «${t.label}»…`);
+      const r = await postJSON('tv appsat ' + t.host);
+      if (r.error || !r.apps) { show($('tvsearchmsg'), 'error: ' + (r.error || 'телевизор не ответил')); return; }
+      tvSearchApps[t.host] = { apps: r.apps, names: r.names || {} };
+      busy($('tvsearchmsg'), ''); renderTvSearch(settings);
+    };
+    row.append(name, sel, b);
+    box.append(row);
+  }
+}
+async function saveTvSearch() {
+  const map = {};
+  document.querySelectorAll('#tvsearch .tvsearchapp').forEach(s => { if (s.value) map[s.dataset.host] = s.value; });
+  show($('tvsearchmsg'), await post('/api/settings', JSON.stringify({ tv_search: map })));
+  settingsLoaded = false; refresh();
 }
 async function loadTvApps() {
   busy($('macromsg'), 'Спрашиваю телевизор…');
@@ -2831,6 +3125,49 @@ let listening = false, listenTrack = null, listenOffset = 0, listenGen = null, l
 // and a moment late. After that only a real jump (seek, new track) restarts it.
 let listenBase = null, listenAlign = null;
 const la = () => $('listenaudio');
+// Safari and the Mac app's window (WebKit) do not play the speaker's stream from a plain
+// address: it has no length and no byte ranges. There the page fetches it itself and hands
+// it to the player through MediaSource (Chrome keeps the plain address).
+const APPLE_WEBKIT = /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|Edg|OPR/.test(navigator.userAgent);
+let mseCtl = null;
+function stopListenAudio() {
+  if (mseCtl) { mseCtl.abort(); mseCtl = null; }
+  const a = la(); a.pause(); a.removeAttribute('src'); a.load();
+}
+function streamInto(a, url) {
+  if (mseCtl) { mseCtl.abort(); mseCtl = null; }
+  if (!APPLE_WEBKIT || !window.MediaSource) { a.src = url; return; }
+  const ms = new MediaSource(), ctl = new AbortController();
+  mseCtl = ctl;
+  a.src = URL.createObjectURL(ms);
+  ms.addEventListener('sourceopen', async () => {
+    try {
+      const r = await fetch(url, { signal: ctl.signal });
+      if (!r.ok) throw new Error('stream ' + r.status);
+      const mime = (r.headers.get('Content-Type') || 'audio/mp4').split(';')[0].trim();
+      const type = mime === 'audio/mp4' ? 'audio/mp4; codecs="mp4a.40.2"' : mime;
+      if (!MediaSource.isTypeSupported(type)) { ctl.abort(); mseCtl = null; a.src = url; return; }
+      const sb = ms.addSourceBuffer(type);
+      sb.mode = 'sequence';
+      const idle = () => new Promise(res => sb.updating ? sb.addEventListener('updateend', res, { once: true }) : res());
+      const reader = r.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done || ctl.signal.aborted) break;
+        await idle();
+        // Not the whole track in memory: what played more than a minute ago goes.
+        if (a.currentTime > 120 && sb.buffered.length && sb.buffered.start(0) < a.currentTime - 90) {
+          try { sb.remove(0, a.currentTime - 60); await idle(); } catch (e) {}
+        }
+        sb.appendBuffer(value);
+      }
+      await idle();
+      if (ms.readyState === 'open' && !ctl.signal.aborted) ms.endOfStream();
+    } catch (e) {
+      if (e.name !== 'AbortError') notePageError('listen (MediaSource): ' + e);
+    }
+  }, { once: true });
+}
 async function beat(on) {
   try { const r = await authed('/api/listen', { method: 'POST', body: JSON.stringify({ id: tabId, on }) }); return r.ok; } catch (e) { return false; }
 }
@@ -2838,19 +3175,22 @@ async function setOutput(where) {
   document.querySelectorAll('#outseg button').forEach(b => b.classList.toggle('on', b.dataset.out === where));
   // Bluetooth: the speaker sends its music to the chosen device (bt.rs); «Колонка» takes it back.
   if (where === 'bt' || (where === 'speaker' && settings && settings.bt_on)) {
-    if (listening) { listening = false; clearInterval(listenBeat); la().pause(); la().removeAttribute('src'); la().load(); beat(false); }
-    show($('actmsg'), await post('/api/cmd', where === 'bt' ? 'bt on' : 'bt off'));
+    if (listening) { listening = false; clearInterval(listenBeat); stopListenAudio(); beat(false); }
+    // The switch itself shows where it plays: only a failure is worth a message.
+    const res = await post('/api/cmd', where === 'bt' ? 'bt on' : 'bt off');
+    if (res.startsWith('error')) show($('actmsg'), res);
     settingsLoaded = false; refresh();
     return;
   }
   if (where === 'here' && !listening) {
-    if (!(await beat(true))) { setOutput('speaker'); return; }
+    // At once, before the speaker answers: a status in between put the switch back on «Колонка».
     listening = true; listenTrack = null; listenGen = null;
+    if (!(await beat(true))) { listening = false; setOutput('speaker'); return; }
     listenBeat = setInterval(() => beat(true), 5000);
     refresh();
   } else if (where === 'speaker' && listening) {
     listening = false; clearInterval(listenBeat);
-    la().pause(); la().removeAttribute('src'); la().load();
+    stopListenAudio();
     beat(false); refresh();
   }
 }
@@ -2886,7 +3226,7 @@ function syncListen(s) {
     listenOffset = L.seekable ? s.position_ms : 0;
     listenBase = null; listenAlign = null;
     a.addEventListener('playing', () => { listenBase = a.currentTime; }, { once: true });
-    a.src = `/api/stream?id=${s.current_id}&t=${listenOffset}`;
+    streamInto(a, `/api/stream?id=${s.current_id}&t=${listenOffset}`);
     if (!L.seekable) note.append(' Этот трек в браузере начнётся с начала.');
   }
   if (s.state === 'playing' && a.paused) a.play().catch(e => notePageError('listen: ' + e));
@@ -2903,8 +3243,21 @@ const PALETTES = {
   aurora: ['#3cffb4', '#2ad4ff', '#a45cff', '#ff5ca8'],
   sunset: ['#ffb347', '#ff5f6d', '#ffc371', '#c94b4b'],
   mono: ['#8e8e9a', '#c9c9d3', '#5e5e6a', '#a8a8b8'],
+  neon: ['#ff00e6', '#00f0ff', '#7a00ff', '#00ff8c'],
+  lava: ['#ff2a00', '#ff7a00', '#b3001b', '#ffcc00'],
+  forest: ['#2ecc71', '#0b6e4f', '#a8e063', '#1abc9c'],
+  candy: ['#ff9a9e', '#fad0c4', '#a18cd1', '#fbc2eb'],
+  night: ['#1e3c72', '#2a5298', '#6a11cb', '#0f4c75'],
+  mint: ['#43e97b', '#38f9d7', '#4facfe', '#b2fefa'],
+  gold: ['#f7971e', '#ffd200', '#c79a00', '#fff1a8'],
+  cyber: ['#f5ff00', '#ff007c', '#00ffea', '#5d00ff'],
+  berry: ['#8e2de2', '#ff0080', '#4a00e0', '#ff5e62'],
+  ice: ['#e0f7ff', '#74ebd5', '#9face6', '#5ee7df'],
 };
-const BG_DEFAULT = { mode: 'anim', pal: 'soundya', speed: 1, int: 0.6, glass: true };
+const PALETTE_NAMES = { soundya: 'soundya', ocean: 'Океан', aurora: 'Сияние', sunset: 'Закат', mono: 'Графит', neon: 'Неон', lava: 'Лава',
+  forest: 'Лес', candy: 'Сладкое', night: 'Ночь', mint: 'Мята', gold: 'Золото', cyber: 'Кибер', berry: 'Ягоды', ice: 'Лёд' };
+const BG_DEFAULT = { mode: 'anim', motion: 'float', pal: 'soundya', speed: 1, int: 0.6, glass: true };
+const BG_MOTIONS = ['float', 'aurora', 'swirl', 'pulse', 'lava'];
 function bgLoad() { try { return Object.assign({}, BG_DEFAULT, JSON.parse(localStorage.getItem('soundya-bg') || '{}')); } catch (e) { return Object.assign({}, BG_DEFAULT); } }
 function bgApply(b) {
   const r = document.documentElement;
@@ -2915,23 +3268,27 @@ function bgApply(b) {
   r.classList.toggle('bg-static', b.mode === 'static');
   r.classList.toggle('bg-off', b.mode === 'off');
   r.classList.toggle('glass-lite', !b.glass);
+  for (const m of BG_MOTIONS) r.classList.toggle('bgm-' + m, (b.motion || 'float') === m);
 }
 function bgSave(b) { try { localStorage.setItem('soundya-bg', JSON.stringify(b)); } catch (e) {} bgApply(b); bgRender(b); }
 function bgRender(b) {
   document.querySelectorAll('#bgmode button').forEach(x => x.classList.toggle('on', x.dataset.bg === b.mode));
   document.querySelectorAll('#bgpal button').forEach(x => x.classList.toggle('on', x.dataset.pal === b.pal));
+  document.querySelectorAll('#bgmotion button').forEach(x => x.classList.toggle('on', x.dataset.motion === (b.motion || 'float')));
+  $('bgmotionbox').hidden = b.mode !== 'anim';
   $('bgspeed').value = b.speed; $('bgspeedv').textContent = '×' + b.speed;
   $('bgint').value = b.int; $('bgintv').textContent = Math.round(b.int * 100) + '%';
   $('bgglass').checked = b.glass;
 }
 (function () {
   for (const [k, c] of Object.entries(PALETTES)) {
-    const btn = document.createElement('button'); btn.dataset.pal = k; btn.title = k;
+    const btn = document.createElement('button'); btn.dataset.pal = k; btn.title = PALETTE_NAMES[k] || k; btn.setAttribute('aria-label', btn.title);
     btn.style.background = `linear-gradient(135deg, ${c[0]}, ${c[1]} 45%, ${c[2]})`;
     btn.onclick = () => bgSave(Object.assign(bgLoad(), { pal: k }));
     $('bgpal').appendChild(btn);
   }
   document.querySelectorAll('#bgmode button').forEach(x => x.onclick = () => bgSave(Object.assign(bgLoad(), { mode: x.dataset.bg })));
+  document.querySelectorAll('#bgmotion button').forEach(x => x.onclick = () => bgSave(Object.assign(bgLoad(), { motion: x.dataset.motion })));
   $('bgspeed').oninput = () => bgSave(Object.assign(bgLoad(), { speed: Number($('bgspeed').value) }));
   $('bgint').oninput = () => bgSave(Object.assign(bgLoad(), { int: Number($('bgint').value) }));
   $('bgglass').onchange = () => bgSave(Object.assign(bgLoad(), { glass: $('bgglass').checked }));
@@ -2957,9 +3314,11 @@ function artSeen() {
 function coverImg(direct, proxied) {
   const img = document.createElement('img'); img.loading = 'lazy'; img.alt = '';
   let timer = null;
-  const viaSpeaker = () => { clearTimeout(timer); if (img.dataset.via === 'speaker') { img.remove(); return; } img.dataset.via = 'speaker'; img.src = proxied; };
+  const viaSpeaker = () => { clearTimeout(timer); if (img.dataset.via === 'speaker' || !proxied) { img.remove(); return; } img.dataset.via = 'speaker'; img.src = proxied; };
   img.onload = () => { clearTimeout(timer); if (img.dataset.via === 'direct') directArt = true; };
   img.onerror = () => { if (img.dataset.via === 'direct' && directArt === null) directArt = false; viaSpeaker(); };
+  // Generated covers (the daily mixes: al.sndcdn.com) the speaker does not relay: straight only.
+  if (!proxied) { img.dataset.via = 'only'; img.onerror = () => img.remove(); img.src = direct; return img; }
   if (directArt === false) { img.dataset.via = 'speaker'; img.src = proxied; return img; }
   img.dataset.via = 'direct'; img.src = direct;
   // A blocked CDN often does not refuse, it just hangs: give up on it after 1.5 s — counted
@@ -2973,7 +3332,7 @@ function card(art, title, sub, onclick, glyph) {
   const b = document.createElement('button'); b.className = 'card'; b.type = 'button'; b.onclick = onclick; b.title = title;
   const c = document.createElement('div'); c.className = 'cv';
   const src = artUrl(art);
-  if (src) c.appendChild(coverImg(art, src));
+  if (src || /^https:\/\/[a-z0-9]+\.sndcdn\.com\//.test(art || '')) c.appendChild(coverImg(art, src));
   else c.innerHTML = glyph || '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>';
   const t = document.createElement('b'); t.textContent = title;
   const sm = document.createElement('small'); sm.textContent = sub || '';
@@ -2992,7 +3351,7 @@ function shelf(title, cards, opts = {}) {
   const box = document.createElement('div'); box.className = 'shelfbox';
   const head = document.createElement('div'); head.className = 'whead';
   const h = document.createElement(opts.play ? 'button' : 'b'); h.textContent = title;
-  if (opts.play) { h.className = 'link shelftitle'; h.title = 'Включить всё'; h.onclick = opts.play; h.innerHTML += ' <span aria-hidden="true">▶</span>'; }
+  if (opts.play) { h.className = 'link shelftitle'; h.title = 'Включить всё'; h.onclick = opts.play; }
   const nav = document.createElement('div'); nav.className = 'shelfnav';
   const row = document.createElement('div'); row.className = 'shelf'; row.append(...cards);
   const by = d => () => row.scrollBy({ left: d * row.clientWidth * .85, behavior: 'smooth' });
@@ -3038,8 +3397,8 @@ const WIDGETS = {
 // Shown only when there is something behind them.
 function widgetReady(k) {
   const st = settings || {};
-  if (k === 'remote') return !!(st.tv_on && st.tv_host);
-  if (k === 'pc') return !!(st.pc_on && (st.pc_host || st.pc_mac));
+  if (k === 'remote') return !!(st.tv_on && (st.tv_host || (st.tvs_more || []).length));
+  if (k === 'pc') return !!(st.pc_on && (st.pc_host || st.pc_mac || (st.pcs_more || []).length));
   if (k === 'scenes') return (st.macros || []).some(m => m.phrase && m.script);
   return true;
 }
@@ -3055,13 +3414,46 @@ function saveHomePrefs(p) {
   settings.home_hidden = p.off; settings.home_order = p.order;
   post('/api/settings', JSON.stringify({ home_hidden: p.off, home_order: p.order }));
 }
+/// Is the home block `k` shown here: the speaker's choice, or in the Mac window its own.
+function wantWidget(k) {
+  if (GLASS && !glassPrefs().full) return glassPrefs().show.includes(k);
+  return !homePrefs().off.includes(k);
+}
+function toggleGlassPick() {
+  const box = $('glasspick');
+  box.hidden = !box.hidden;
+  if (box.hidden) return;
+  const g = glassPrefs(), list = $('glasslist');
+  list.replaceChildren();
+  const row = (label, on, fn) => {
+    const l = document.createElement('label'); const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = on;
+    cb.onchange = () => { fn(cb.checked); };
+    const t = document.createElement('span'); t.textContent = label; l.append(cb, t); list.appendChild(l);
+  };
+  const save = p => { try { localStorage.setItem('soundya-glass', JSON.stringify(p)); } catch (e) {} glassApply(); homeWidgets(); loadHome(true); };
+  row('Плеер', g.player, on => save(Object.assign(glassPrefs(), { player: on })));
+  row('Будильник', g.show.includes('alarm'), on => {
+    const p = glassPrefs(); p.show = on ? p.show.concat(['alarm']) : p.show.filter(x => x !== 'alarm'); save(p);
+  });
+  for (const k of Object.keys(WIDGETS)) {
+    row(WIDGETS[k][0], g.show.includes(k), on => {
+      const p = glassPrefs(); p.show = on ? p.show.concat([k]) : p.show.filter(x => x !== k); save(p);
+    });
+  }
+  $('glassfull').checked = !!g.full;
+  $('glassfull').onchange = () => save(Object.assign(glassPrefs(), { full: $('glassfull').checked }));
+}
+document.addEventListener('click', e => {
+  const box = $('glasspick');
+  if (box && !box.hidden && !box.contains(e.target) && !$('glassbtn').contains(e.target)) box.hidden = true;
+});
 function homeWidgets() {
-  const { off, order } = homePrefs();
+  const { order } = homePrefs();
   const home = $('tab-home'), anchor = $('homemsg2');
   for (const k of order) {
     const w = home.querySelector(`.widget[data-w="${k}"]`);
     if (!w) continue;
-    w.hidden = off.includes(k) || !widgetReady(k);
+    w.hidden = !wantWidget(k) || !widgetReady(k);
     home.insertBefore(w, anchor);
   }
 }
@@ -3387,7 +3779,7 @@ async function loadWidgets(force) {
   let r;
   try { r = JSON.parse((await post('/api/cmd', 'widgets')).replace(/^OK:\s*/, '')); } catch (e) { r = {}; }
   renderWeather(r.weather || { error: 'нет ответа' });
-  renderPc(r.pc);
+  renderPcs(r.pcs || (r.pc ? [r.pc] : []));
 }
 function renderWeather(w) {
   const box = $('wweather');
@@ -3412,12 +3804,20 @@ function renderWeather(w) {
   box.querySelector('.wxmeta small').textContent = [w.feels != null ? 'ощущается ' + deg(w.feels) : '', w.max != null ? 'днём ' + deg(w.max) : '',
     w.min != null ? 'ночью ' + deg(w.min) : '', w.rain ? 'осадки ' + w.rain + '%' : '', w.wind != null ? 'ветер ' + w.wind + ' м/с' : ''].filter(Boolean).join(' · ');
 }
-function renderPc(p) {
+// Every computer: one block each, with its name on top when there are several.
+function renderPcs(list) {
   const box = $('wpc');
-  if (!p) { box.innerHTML = ''; return; }
-  if (p.error) { box.innerHTML = ''; const h = document.createElement('p'); h.className = 'hint'; h.textContent = 'Компьютер не отвечает: ' + p.error; box.appendChild(h); return; }
-  const rows = [['Процессор', p.cpu, p.cpu_temp], ['Видеокарта', p.gpu, p.gpu_temp], ['Память', p.ram_used, null]].filter(r => r[1] != null || r[2] != null);
   box.innerHTML = '';
+  for (const p of list) {
+    const part = document.createElement('div'); part.className = 'pcone';
+    if (list.length > 1) { const h = document.createElement('b'); h.className = 'pctitle'; h.textContent = p.name || 'Компьютер'; part.appendChild(h); }
+    renderPc(part, p);
+    box.appendChild(part);
+  }
+}
+function renderPc(box, p) {
+  if (p.error) { const h = document.createElement('p'); h.className = 'hint'; h.textContent = 'Компьютер не отвечает: ' + p.error; box.appendChild(h); return; }
+  const rows = [['Процессор', p.cpu, p.cpu_temp], ['Видеокарта', p.gpu, p.gpu_temp], ['Память', p.ram_used, null]].filter(r => r[1] != null || r[2] != null);
   for (const [name, load, temp] of rows) {
     const row = document.createElement('div'); row.className = 'pcrow';
     row.innerHTML = '<span class="pcname"></span><div class="pcbar"><i></i></div><span class="pcval"></span>';
@@ -3426,7 +3826,7 @@ function renderPc(p) {
     row.querySelector('.pcval').textContent = [load != null ? load + '%' : '', temp != null ? temp + '°' : ''].filter(Boolean).join(' · ');
     box.appendChild(row);
   }
-  if (!rows.length) box.innerHTML = '<p class="hint">Компьютер на связи, но не рассказал о себе.</p>';
+  if (!rows.length) { const h = document.createElement('p'); h.className = 'hint'; h.textContent = 'Компьютер на связи, но не рассказал о себе.'; box.appendChild(h); }
 }
 function renderScenes() {
   const box = $('wscenes'); if (!box) return;
@@ -3461,41 +3861,65 @@ async function saveRemoteTab() {
   show($('remotetabmsg'), await post('/api/settings', JSON.stringify({ remote_tab: settings.remote_tab })));
 }
 async function loadHome(force) {
+  // A reload opens the saved «Главная» tab before the speaker's settings are in: that early
+  // call failed half-way, yet counted as done, and held the shelves back for a minute.
+  // The first status (with the settings) loads it instead.
+  if (!statusIn) return;
   if (!force && Date.now() - homeLoaded < 60000) return;
   homeLoaded = Date.now();
+  // Only what is shown is asked for (the Mac window: «не нагружать колонку»).
+  if (wantWidget('sc')) loadShelves(force);
+  // «Моя музыка» ahead, quietly: its covers are there before the tab is opened.
+  if (!GLASS || glassPrefs().full) setTimeout(() => { if (settings.token && !$('mylists').children.length) library(); }, 2500);
   homeWidgets();
   renderScenes();
-  loadWidgets(force);
+  if (wantWidget('weather') || wantWidget('pc')) loadWidgets(force);
+  if (wantWidget('recent') || wantWidget('foryou')) loadHistory();
+  if (!wantWidget('plans')) return;
   const p = await postJSON('plan json');
   if (!p.error) {
     $('homeplantext').textContent = p.today || '';
     const items = (p.items || []).filter(i => !i.overdue && (i.day === 0 || i.day === null || i.day === undefined)).slice(0, 4);
     $('homeplans').replaceChildren(...items.map(i => { const li = planRow(i); li.querySelectorAll('.del').forEach(b => b.remove()); return li; }));
   } else $('homeplantext').textContent = 'Планы недоступны: ' + p.error;
-  loadHistory();
-  if (settings && settings.token && (force || Date.now() - shelvesLoaded > 15 * 60000)) {
-    shelvesLoaded = Date.now();
-    const h = await postJSON('home');
-    if (h.error) { shelvesLoaded = 0; return; }
-    $('homeshelves').replaceChildren(...(h.shelves || []).map(sh => shelf(sh.title, sh.items.map(x => plCard(x, $('homemsg2'))))));
-  } else if (!settings || !settings.token) $('homeshelves').replaceChildren();
 }
-// The row of small statuses on top; a tap opens them all, like an iPhone's control centre.
+// The SoundCloud shelves do not wait for the plans (those can take seconds).
+// A failed try (the speaker restarting, SoundCloud not reachable yet, settings not in yet)
+// is tried again a few times instead of leaving the shelves empty for 15 minutes.
+let shelvesRetry = 0, shelvesTimer = 0;
+function retryShelves() {
+  if (shelvesRetry >= 6 || shelvesTimer) return;
+  shelvesRetry++;
+  shelvesTimer = setTimeout(() => { shelvesTimer = 0; loadShelves(true); }, 5000 * shelvesRetry);
+}
+async function loadShelves(force) {
+  if (!statusIn) return;
+  if (!settings.token) { $('homeshelves').replaceChildren(); return; }
+  if (!force && Date.now() - shelvesLoaded <= 15 * 60000) return;
+  shelvesLoaded = Date.now();
+  const h = await postJSON('home');
+  if (h.error || !(h.shelves || []).length) { shelvesLoaded = 0; retryShelves(); return; }
+  shelvesRetry = 0;
+  $('homeshelves').replaceChildren(...h.shelves.map(sh => shelf(sh.title, sh.items.map(x => plCard(x, $('homemsg2'))))));
+}
+// One dot in the player instead of the row of statuses: green, yellow when something
+// needs a look, red when something is broken; hover — what, a tap — «Сервисы».
+// Only what is switched on counts: AirPlay off is not a warning.
+function statusProblems(s) {
+  const st = s.settings || {}, net = s.net || {}, bad = [], warn = [];
+  if (st.soundcloud && s.login === 'refused') bad.push('SoundCloud: вход устарел');
+  if (net.level === 'bad' || net.level === 'down') bad.push(net.level === 'down' ? 'Сеть: нет связи' : 'Сеть: плохая');
+  else if (net.level === 'slow') warn.push('Сеть: медленная');
+  if (st.airplay && s.airplay && s.airplay.error) bad.push('AirPlay: ' + s.airplay.error);
+  if (s.update && s.update.available) warn.push('Есть обновление ' + s.update.latest);
+  return { bad, warn };
+}
 function renderStatusRow(s) {
-  const st = s.settings || {}, net = s.net || {};
-  const pill = (name, cls, text) => `<span class="spill"><i class="dot ${cls}"></i>${name}${text ? ' <small>' + text + '</small>' : ''}</span>`;
-  const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const parts = [
-    pill('SoundCloud', !st.soundcloud ? '' : s.login === 'refused' ? 'bad' : s.user ? 'good' : 'slow', ''),
-    pill('Сеть', net.level === 'good' ? 'good' : net.level === 'slow' ? 'slow' : net.level === 'unknown' || !net.level ? '' : 'bad', ''),
-  ];
-  if (st.airplay) parts.push(pill('AirPlay', s.airplay && s.airplay.active ? 'good' : '', s.airplay && s.airplay.active ? 'играет' : ''));
-  if (st.pc_on && (st.pc_host || st.pc_mac)) parts.push(pill('ПК', 'good', ''));
-  if (st.tv_on && st.tv_host) parts.push(pill('ТВ', 'good', ''));
-  if (s.update && s.update.available) parts.push(pill('Обновление', 'slow', esc(s.update.latest)));
-  parts.push('<span class="spill more" aria-hidden="true">›</span>');
-  const html = parts.join('');
-  if ($('statusrow').dataset.sig !== html) { $('statusrow').dataset.sig = html; $('statusrow').innerHTML = html; }
+  const { bad, warn } = statusProblems(s), net = s.net || {};
+  const netWord = { good: 'сеть хорошая', slow: 'сеть медленная', bad: 'сеть плохая', down: 'нет связи' }[net.level] || 'сеть проверяется';
+  $('netdot').className = 'dot ' + (bad.length ? 'bad' : warn.length ? 'slow' : net.level === 'good' ? 'good' : net.level ? 'good' : '');
+  const title = bad.concat(warn).join('\n') || 'Всё в порядке · ' + netWord;
+  $('netpill').title = title; $('netpill').setAttribute('aria-label', 'Состояние: ' + title.replace(/\n/g, '; '));
 }
 function openStatus() { $('statussheet').hidden = false; }
 function closeStatus() { $('statussheet').hidden = true; }
@@ -3580,7 +4004,7 @@ async function btCmd(c) {
   settingsLoaded = false; refresh();
 }
 function btToggle(on) { btCmd(on ? 'on' : 'off'); }
-function btForget() { if (confirm('Забыть «' + (settings.bt_name || settings.bt_mac) + '»? Чтобы подключить снова, понадобится режим сопряжения.')) btCmd('forget ' + settings.bt_mac); }
+function btForget() { btCmd('forget ' + settings.bt_mac); }
 async function btConnect(mac, name) {
   busy($('btmsg'), 'Подключаю ' + (name || mac) + '… (до 30 секунд; первый раз — режим сопряжения на устройстве)');
   const r = await post('/api/cmd', 'bt connect ' + mac);
@@ -3596,7 +4020,19 @@ async function btScan() {
   $('btmsg').textContent = list.length ? '' : 'Ничего не нашлось: включите устройство и переведите его в режим сопряжения.';
   $('btlist').replaceChildren(...list.map(d => item(d.name || 'Без имени',
     [d.connected ? 'подключено' : d.paired ? 'сопряжено' : '', d.audio ? 'наушники / колонка' : '', d.name ? '' : d.mac].filter(Boolean).join(' · '),
-    '', () => btConnect(d.mac, d.name), d.audio ? '' : 'muted')));
+    '', () => d.audio || d.paired ? btConnect(d.mac, d.name) : btNotAudio(d, list), d.audio ? '' : 'muted')));
+}
+// Grey rows: no sound there (a band, a lamp's control, «Ditoo-Plus-light»). Many speakers have two
+// Bluetooth devices — the app's one and «…-audio»: point to it instead of a «не найдено» later.
+function btNotAudio(d, list) {
+  const base = (d.name || '').toLowerCase().replace(/[-_ ]?(light|ble|le|app|control)$/, '');
+  const twin = base && list.find(x => x.audio && x.mac !== d.mac && (x.name || '').toLowerCase().startsWith(base));
+  if (twin) { show($('btmsg'), '«' + d.name + '» — не для звука. Подключаю «' + twin.name + '»…'); btConnect(twin.mac, twin.name); return; }
+  const msg = '«' + (d.name || d.mac) + '» не похоже на наушники или колонку — это, например, браслет или управление лампой.'
+    + ' У некоторых колонок (Divoom Ditoo и др.) для звука отдельное устройство с «audio» в имени: включите на колонке режим Bluetooth и нажмите «Найти».';
+  // Connected as asked; the note says why it may not play.
+  btConnect(d.mac, d.name);
+  show($('btmsg'), msg);
 }
 function renderHome(s) {
   renderStatusRow(s);
@@ -3612,12 +4048,12 @@ function renderHome(s) {
     stat('Соединение', { good: 'хорошее', slow: 'медленное', bad: 'плохое', down: 'нет связи', unknown: 'проверяю' }[net.level] || '—',
       net.level === 'good' ? 'good' : net.level === 'slow' ? 'slow' : net.level === 'unknown' ? '' : 'bad', () => openSettings('net')),
     stat('Музыка по умолчанию', st.music_default === 'yandex' ? 'Яндекс Музыка' : 'SoundCloud', 'good', () => openSettings('speaker')),
-    stat('AirPlay', !st.airplay ? 'выключен' : s.airplay && s.airplay.active ? 'играет' : 'готов', st.airplay ? 'good' : '', () => openSettings('speaker', 'airplay')),
+    stat('AirPlay', !st.airplay ? 'выключен' : s.airplay && s.airplay.error ? 'ошибка' : s.airplay && s.airplay.active ? 'играет' : 'готов',
+      !st.airplay ? '' : s.airplay && s.airplay.error ? 'bad' : 'good', () => openSettings('speaker', 'airplay')),
     stat('Приглушение', { smart: 'умное', calls: 'звонки', notify: 'уведомления', manual: 'вручную', off: 'выключено' }[st.duck_mode] || '—',
       st.duck_mode === 'off' ? '' : 'good', () => openSettings('speaker', 'ducksection')),
     stat('Обновления', s.update && s.update.available ? 'есть ' + s.update.latest : 'последняя версия', s.update && s.update.available ? 'slow' : 'good', () => openSettings('speaker', 'updsection')),
     stat('Защита', st.pin_on ? 'PIN включён' : 'без PIN', st.pin_on ? 'good' : 'slow', () => openSettings('speaker', 'pinsection')),
-    stat('Где играет', s.listen && s.listen.listeners ? 'в браузере (' + s.listen.listeners + ')' : 'колонка', 'good', () => { window.scrollTo({ top: 0, behavior: 'smooth' }); if ($('volpop').hidden) toggleVolume(); }),
   );
   const d = $('homedevices'); d.innerHTML = '';
   const DEV_ICON = {
@@ -3639,13 +4075,26 @@ function renderHome(s) {
   };
   const dv = s.device || {};
   dev(modelName(dv.model), `soundya ${dv.version || ''}${dv.firmware ? ' · прошивка ' + dv.firmware : ''}${s.led && s.led.ring ? ' · кольцо: ' + s.led.ring.split(',')[0] : ''}${dv.display ? ' · экран-часы' : ''}`);
-  const pcOn = st.pc_on && (st.pc_host || st.pc_mac);
-  dev('Компьютер', pcOn ? (st.pc_host || 'только включение по сети') + (s.pc_legacy ? ' · обновите soundya-pc: ключ идёт открытым текстом' : '') : 'не настроен',
-    pcOn ? 'Состояние' : 'Настроить',
-    pcOn ? async () => { busy($('homemsg'), 'Спрашиваю компьютер…'); show($('homemsg'), await post('/api/cmd', 'pc metrics')); } : () => openSettings('devices'));
-  const tvOn = st.tv_on && st.tv_host;
-  dev('Телевизор / проектор', tvOn ? st.tv_host : 'не настроен', tvOn ? 'Проверить' : 'Настроить',
-    tvOn ? async () => { busy($('homemsg'), 'Проверяю телевизор…'); show($('homemsg'), await post('/api/cmd', 'tv ping')); } : () => openSettings('devices'));
+  // Every computer and TV, not just the first: the extra ones are asked by name («on имя\t…»).
+  const ask = (name, line, wait) => async () => {
+    busy($('homemsg'), wait);
+    show($('homemsg'), await post('/api/cmd', name === null ? line : 'on ' + name + '\t' + line));
+  };
+  const pcs = [];
+  if ((st.pc_host || '').trim() || (st.pc_mac || '').trim()) pcs.push({ name: null, label: st.pc_name, host: st.pc_host });
+  for (const p of st.pcs_more || []) if ((p.host || '').trim() || (p.mac || '').trim()) pcs.push({ name: p.name, label: p.name, host: p.host });
+  if (st.pc_on && pcs.length) for (const p of pcs) {
+    const sub = (p.label ? p.label + ' · ' : '') + ((p.host || '').trim() || 'только включение по сети')
+      + (p.name === null && s.pc_legacy ? ' · обновите soundya-pc: ключ идёт открытым текстом' : '');
+    dev('Компьютер', sub, 'Состояние', ask(p.name, 'pc metrics', 'Спрашиваю ' + (p.label || 'компьютер') + '…'));
+  }
+  else dev('Компьютер', 'не настроен', 'Настроить', () => openSettings('devices'));
+  const tvs = [];
+  if ((st.tv_host || '').trim()) tvs.push({ name: null, label: st.tv_name, host: st.tv_host });
+  for (const t of st.tvs_more || []) if ((t.host || '').trim()) tvs.push({ name: t.name, label: t.name, host: t.host });
+  if (st.tv_on && tvs.length) for (const t of tvs)
+    dev('Телевизор / проектор', (t.label ? t.label + ' · ' : '') + t.host, 'Проверить', ask(t.name, 'tv ping', 'Проверяю ' + (t.label || 'телевизор') + '…'));
+  else dev('Телевизор / проектор', 'не настроен', 'Настроить', () => openSettings('devices'));
   if (s.airplay && s.airplay.active) dev('Телефон по AirPlay', 'сейчас играет на колонке');
   dev('Bluetooth', st.bt_mac ? (st.bt_name || st.bt_mac) + (st.bt_on ? ' · музыка там' : ' · выключено') : 'наушники и колонки не подключены',
     st.bt_mac ? (st.bt_on ? 'На колонку' : 'Включить') : 'Подключить',
@@ -3702,12 +4151,26 @@ function renderDisp(st, dev) {
   dispList = (st.display_widgets || ['clock', 'weather', 'pc']).slice();
   $('dispsec').value = st.display_secs || 10; $('dispsecv').textContent = $('dispsec').value;
   $('dispbr').value = st.display_bright || 100; $('dispbrv').textContent = $('dispbr').value + '%';
+  $('dispnb').value = st.display_night_bright || 20; $('dispnbv').textContent = $('dispnb').value + '%';
+  $('dispnfrom').value = hm(st.display_night_from ?? 1320); $('dispnto').value = hm(st.display_night_to ?? 420);
+  $('displight').checked = !!st.display_light_own;
+  dispLightShown();
   $('dispcity').value = st.display_city || '';
   renderDispList();
 }
+function dispLightShown() {
+  const own = $('displight').checked;
+  $('displightbox').hidden = !own;
+  $('displighthint').textContent = own
+    ? 'Часы рисует soundya — весь экран одной яркостью: днём и ночью своей.'
+    : 'Сейчас как у родных часов: температура и остальное приглушаются вечером вместе с ними.';
+}
 async function saveDisp() {
+  dispLightShown();
   show($('dispmsg'), await post('/api/settings', JSON.stringify({ display_on: $('dispon').checked, display_widgets: dispList,
-    display_secs: Number($('dispsec').value), display_bright: Number($('dispbr').value) })));
+    display_secs: Number($('dispsec').value), display_bright: Number($('dispbr').value),
+    display_light_own: $('displight').checked, display_night_bright: Number($('dispnb').value),
+    display_night_from: mins($('dispnfrom').value || '22:00'), display_night_to: mins($('dispnto').value || '07:00') })));
 }
 async function findCity() {
   busy($('dispmsg'), 'Ищу город…');
@@ -3859,7 +4322,6 @@ function planRow(i) {
     };
     const del = document.createElement('button'); del.className = 'link del'; del.textContent = '✕'; del.title = 'Удалить';
     del.onclick = async () => {
-      if (!confirm('Удалить «' + i.title + '»?')) return;
       show($('planmsg'), await post('/api/cmd', i.source === 'google' ? `plan gdel ${i.list} ${i.id}` : `plan del ${i.id}`));
       loadPlans();
     };
@@ -4104,9 +4566,9 @@ async function addPlan() {
   show($('planmsg'), r);
   if (!r.startsWith('error')) { $('plantitle').value = ''; $('plantime').value = ''; $('planwhen').textContent = whenLabel($('planday').value, ''); setTimeout(loadPlans, 300); }
 }
-async function savePlanSettings() {
+async function savePlanSettings(msg = 'plansetmsg') {
   const [h, m] = ($('briefat').value || '08:00').split(':').map(Number);
-  show($('plansetmsg'), await post('/api/settings', JSON.stringify({
+  show($(msg), await post('/api/settings', JSON.stringify({
     plan_warn: Number($('planwarn').value), plan_due_time: Number($('plandue').value),
     brief_on: $('briefon').checked, brief_phrase: $('briefphrase').checked, brief_at: h * 60 + m, brief_days: $('briefdays').value,
   })));
@@ -4173,7 +4635,8 @@ async function setPlanMode(m) {
   const msg = $('tab-plans').classList.contains('on') ? $('planmsg') : $('planmodemsg');
   busy(msg, '…');
   const r = await post('/api/settings', JSON.stringify({ plan_mode: m }));
-  show(msg, r.startsWith('error') ? r : 'OK: режим «' + (m === 'work' ? 'Рабочий' : 'Обычный') + '»');
+  // The switch shows the mode itself: only a failure is worth a line.
+  if (r.startsWith('error')) show(msg, r); else { msg.className = 'msg'; msg.textContent = ''; }
   settingsLoaded = false; await refresh(); if ($('tab-plans').classList.contains('on')) loadPlans();
 }
 document.querySelectorAll('.planmodeseg button').forEach(b => b.onclick = () => setPlanMode(b.dataset.m));
@@ -4201,7 +4664,7 @@ function renderTeams(st) {
     const name = document.createElement('input'); name.type = 'text'; name.placeholder = i ? 'Название: маркетинг' : 'Название: команда'; name.value = t.name || '';
     name.oninput = () => { t.name = name.value; teamsDirty = true; };
     const del = document.createElement('button'); del.className = 'link sdel'; del.textContent = '✕'; del.title = 'Удалить команду';
-    del.onclick = () => { if (confirm('Удалить команду «' + (t.name || 'без названия') + '»?')) { teams.splice(i, 1); teamsDirty = true; teamsSig = ''; renderTeams(settings); } };
+    del.onclick = () => { { teams.splice(i, 1); teamsDirty = true; teamsSig = ''; renderTeams(settings); } };
     head.append(name, del);
     const mails = document.createElement('textarea'); mails.placeholder = 'Почты участников — по одной в строке или через запятую';
     mails.value = (t.emails || []).join('\n');
@@ -4455,7 +4918,6 @@ async function saveGoogle() {
   settingsLoaded = false; refresh(); setTimeout(() => loadPlans(true), 1500);
 }
 async function googleOff() {
-  if (!confirm('Отключить Google? Вход будет удалён с колонки (ключ клиента останется).')) return;
   show($('gmsg'), await post('/api/cmd', 'google off'));
   settingsLoaded = false; refresh();
 }
@@ -4519,19 +4981,19 @@ async function duckCmd(c) { show($('duckmsg'), await post('/api/cmd', 'duck ' + 
 // this page with it in the #fragment (never sent to any server).
 (function () {
   const js = "(function(){if(location.hostname.indexOf('soundcloud.com')<0){alert('Откройте soundcloud.com и нажмите закладку там');return}"
-    + "var m=document.cookie.match(/(?:^|; )oauth_token=([^;]+)/);"
+    + "var m=document.cookie.match(/(?:^|; )oauth_token=([^;]+)/),r=document.cookie.match(/(?:^|; )oauth_refresh_token=([^;]+)/);"
     + "if(!m){alert('Не вижу вход SoundCloud: войдите на soundcloud.com в этом браузере или вставьте токен вручную (инструкция на странице колонки)');return}"
-    + "window.open('http://" + location.host + "/#sctoken='+encodeURIComponent(m[1]))})()";
+    + "window.open('http://" + location.host + "/#sctoken='+encodeURIComponent(m[1])+(r?'&screfresh='+encodeURIComponent(r[1]):''))})()";
   $('scbookmark').href = 'javascript:' + js;
 })();
 async function takeTokenFromHash() {
-  const m = location.hash.match(/^#sctoken=([^&]+)/);
+  const m = location.hash.match(/^#sctoken=([^&]+)(?:&screfresh=([^&]+))?/);
   if (!m) return;
   history.replaceState(null, '', location.pathname);
-  const t = decodeURIComponent(m[1]).trim();
-  if (!/^[\w-]{10,300}$/.test(t)) { alert('Это не похоже на вход SoundCloud.'); return; }
-  if (!confirm('Сохранить вход SoundCloud из браузера на колонке?')) return;
-  const r = await post('/api/settings', JSON.stringify({ token: t }));
+  // Old tokens: 2-123456-…; since 2026 a JWT (eyJ….….…, ~900 characters).
+  const t = decodeURIComponent(m[1]).trim(), rf = m[2] ? decodeURIComponent(m[2]).trim() : '';
+  if (!/^[\w.-]{10,4000}$/.test(t)) { alert('Это не похоже на вход SoundCloud.'); return; }
+  const r = await post('/api/settings', JSON.stringify(Object.assign({ token: t }, /^[\w.-]{8,4000}$/.test(rf) ? { sc_refresh: rf } : {})));
   openSettings('account');
   show($('loginmsg'), r);
   settingsLoaded = false; refresh();
@@ -4552,7 +5014,6 @@ async function setPin() {
   $('pinnew').value = ''; settingsLoaded = false; refresh();
 }
 async function offPin() {
-  if (!confirm('Выключить PIN? Управлять колонкой снова сможет любой в вашей сети.')) return;
   show($('pinmsg'), await post('/api/pin', ''));
   settingsLoaded = false; refresh();
 }
@@ -4636,8 +5097,12 @@ function maybeWizard(st) {
 }
 
 // ---- «Нас уже 100+» (число — с сервера статистики через колонку) ----
-async function loadParty() {
-  try { if (localStorage.getItem('soundya-party') === 'off') return; } catch (e) {}
+// Only after a fresh install (the speaker keeps «seen»; an update counts as seen).
+let partyAsked = false;
+async function loadParty(st) {
+  if (partyAsked || !st || st.party_seen !== false) return;
+  partyAsked = true;
+  try { if (localStorage.getItem('soundya-party') === 'off') { post('/api/settings', JSON.stringify({ party_seen: true })); return; } } catch (e) {}
   let c;
   try { c = await (await fetch('/api/community')).json(); } catch (e) { return; }
   if (!c.ok || !(c.ever >= 100)) return;
@@ -4647,8 +5112,25 @@ async function loadParty() {
 function closeParty() {
   $('party').hidden = true;
   try { localStorage.setItem('soundya-party', 'off'); } catch (e) {}
+  post('/api/settings', JSON.stringify({ party_seen: true }));
 }
-loadParty();
+
+// ---- «На экран Домой»: на телефоне панель открывается как приложение ----
+function appHint() {
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const ua = navigator.userAgent, ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  const android = /Android/.test(ua);
+  try { if (standalone || (!ios && !android) || localStorage.getItem('soundya-apphint') === 'off') return; } catch (e) { if (standalone || (!ios && !android)) return; }
+  $('apphinttext').textContent = ios
+    ? 'Нажмите «Поделиться» ⬆︎ внизу Safari → «На экран «Домой»». Панель откроется значком, без адресной строки и без поиска адреса колонки.'
+    : 'Откройте меню ⋮ в Chrome → «Добавить на главный экран». Панель будет открываться значком, без поиска адреса колонки.';
+  $('apphint').hidden = false;
+}
+function closeAppHint() {
+  $('apphint').hidden = true;
+  try { localStorage.setItem('soundya-apphint', 'off'); } catch (e) {}
+}
+appHint();
 
 // ---- музыка по умолчанию ----
 const MUSIC_HINT = {
@@ -4662,6 +5144,34 @@ function renderMusic(m) {
   $('musichint').textContent = MUSIC_HINT[m] || '';
   $('keyword').checked = m === 'yandex';
 }
+// «Будильник»: soundya's (music, «я проснулся», the sum) or Alice's stock one.
+const ALARM_HINT = {
+  own: '«Алиса, разбуди меня в 7 под мои лайки» — будильник soundya: музыка, потом Алиса; выключается только словами «Алиса, я проснулся» и ответом на пример. Виджет — на главной.',
+  alice: '«Алиса, разбуди меня в 7» ставит обычный будильник Алисы. Будильники soundya не звонят, виджета на главной нет.',
+};
+function renderAlarmKind(own) {
+  const k = own === false ? 'alice' : 'own';
+  document.querySelectorAll('#alarmkind button').forEach(b => {
+    b.classList.toggle('on', b.dataset.alarm === k); b.setAttribute('aria-checked', String(b.dataset.alarm === k));
+  });
+  $('alarmhint').textContent = ALARM_HINT[k];
+  $('alarmvolbox').hidden = k === 'alice';
+  const st = settings || {};
+  if (document.activeElement !== $('alarmvol')) { $('alarmvol').value = st.alarm_volume || 5; $('alarmvolv').textContent = $('alarmvol').value; }
+  $('alarmlouder').checked = st.alarm_louder !== false;
+  const w = document.querySelector('.widget[data-w="alarm"]');
+  if (w) w.classList.toggle('alarmoff', k === 'alice');
+}
+async function saveAlarmVolume() {
+  show($('spkmsg'), await post('/api/settings', JSON.stringify({ alarm_volume: Number($('alarmvol').value), alarm_louder: $('alarmlouder').checked })));
+  settingsLoaded = false; refresh();
+}
+document.querySelectorAll('#alarmkind button').forEach(b => b.onclick = async () => {
+  const own = b.dataset.alarm === 'own';
+  renderAlarmKind(own);
+  show($('spkmsg'), await post('/api/settings', JSON.stringify({ alarm_own: own })));
+  settingsLoaded = false; refresh();
+});
 document.querySelectorAll('#musicdefault button').forEach(b => b.onclick = async () => {
   renderMusic(b.dataset.music);
   show($('spkmsg'), await post('/api/settings', JSON.stringify({ music_default: b.dataset.music })));
@@ -4724,7 +5234,6 @@ async function loadHistory() {
 }
 
 async function clearHistory() {
-  if (!confirm('Очистить историю прослушивания?')) return;
   await post('/api/cmd', 'history clear');
   loadHistory();
 }
@@ -4743,7 +5252,9 @@ document.querySelectorAll('nav button').forEach(b => {
   };
 });
 try {
-  const saved = localStorage.getItem('tab');
+  // «/#plans» (the Mac widget's «+») opens that tab.
+  const hashTab = /^#(plans|mine|home|settings|remote)$/.exec(location.hash);
+  const saved = hashTab ? hashTab[1] : (GLASS && !glassPrefs().full) ? 'home' : localStorage.getItem('tab');
   const btn = saved && document.querySelector('nav button[data-tab="' + saved + '"]');
   if (btn) setTimeout(() => btn.click(), 0);
 } catch (e) {}
@@ -4833,7 +5344,8 @@ async function refresh() {
     st.append(busyText);
   } else if (s.airplay && s.airplay.active) {
     st.textContent = s.state === 'paused' ? 'играет AirPlay · SoundCloud на паузе' : 'играет AirPlay';
-  } else st.textContent = names[s.state] || s.state;
+  // «Играет / остановлено» is what the play button already shows: only what it does not.
+  } else st.textContent = '';
   renderAirplay(s.airplay);
   lastStatus = s;
   renderUpdate(s.update);
@@ -4880,7 +5392,9 @@ async function refresh() {
   }
 
   settings = s.settings;
+  statusIn = true;
   applyRemoteTab();
+  renderTvPick(settings);
   // «сохранено, проверяю вход…» was the save's answer: replaced once the check is done.
   for (const el of document.querySelectorAll('.msg')) {
     if (!/проверяю вход/.test(el.textContent)) continue;
@@ -4896,6 +5410,7 @@ async function refresh() {
   $('username').textContent = s.user || (s.login === 'refused' ? 'токен больше не принимается'
     : logged ? 'токен сохранён, проверяю…' : '');
   $('relogin').hidden = s.login !== 'refused';
+  renderRenew(s);
   $('loginwarn').hidden = s.login !== 'refused';
   renderNet(s.net);
   renderDuckState(s.ducking);
@@ -4932,6 +5447,7 @@ async function refresh() {
     $('proxy').value = settings.proxy;
     $('keyword').checked = settings.keyword_only;
     renderMusic(settings.music_default || (settings.keyword_only ? 'yandex' : 'soundcloud'));
+    renderAlarmKind(settings.alarm_own);
     $('ring').checked = settings.ring !== false;
     renderLight(settings);
     renderLedOrder(settings.led_order, s.led);
@@ -4943,8 +5459,15 @@ async function refresh() {
     renderCal(settings);
     renderDisp(settings, s.device);
     maybeWizard(settings);
+    loadParty(settings);
     renderEq(settings);
     $('pchost').value = settings.pc_host || '';
+    for (const [id, k] of [['pcpower', 'pc_power'], ['pcapps', 'pc_apps'], ['pctg', 'pc_tg'], ['pcsearch', 'pc_search'], ['pcplain', 'pc_plain']]) $(id).checked = settings[k] !== false;
+    $('pckeep').value = settings.pc_keep || '';
+    $('pcname').value = settings.pc_name || '';
+    $('tvname').value = settings.tv_name || '';
+    renderDevs('pc', settings.pcs_more || []);
+    renderDevs('tv', settings.tvs_more || []);
     $('pctoken').value = settings.pc_token || '';
     $('pcmac').value = settings.pc_mac || '';
     renderContacts(settings.pc_contacts || []);
@@ -4953,6 +5476,7 @@ async function refresh() {
     $('stats').checked = settings.stats !== false;
     $('shareheard').checked = settings.share_heard === true;
     $('tvhost').value = settings.tv_host || '';
+    renderTvSearch(settings);
     $('fsc').checked = settings.soundcloud !== false;
     $('fpc').checked = settings.pc_on !== false;
     $('ftv').checked = settings.tv_on !== false;
@@ -5064,7 +5588,10 @@ function settingsBody(extra) {
     light_speed: Number($('lightspeed').value), light_intensity: Number($('lightint').value),
     light_bass: $('lightbass').value, light_mid: $('lightmid').value, light_high: $('lighthigh').value,
     pc_host: $('pchost').value, pc_token: $('pctoken').value, pc_mac: $('pcmac').value,
+    pc_name: $('pcname').value, pcs_more: readDevs('pc'), tv_name: $('tvname').value, tvs_more: readDevs('tv'),
     pc_contacts: readContacts(),
+    pc_power: $('pcpower').checked, pc_apps: $('pcapps').checked, pc_tg: $('pctg').checked,
+    pc_search: $('pcsearch').checked, pc_plain: $('pcplain').checked, pc_keep: $('pckeep').value,
     airplay: $('airplay').checked, airplay_name: $('airplayname').value, airplay_icon: $('airplayicon').value,
     stats: $('stats').checked, share_heard: $('shareheard').checked,
     tv_host: $('tvhost').value,
@@ -5074,21 +5601,45 @@ function settingsBody(extra) {
 }
 
 async function login() {
-  const t = $('token').value.trim();
+  const t = $('token').value.trim(), r = $('screfresh').value.trim();
   if (!t) return;
   busy($('loginmsg'), 'Проверяю…');
-  show($('loginmsg'), await post('/api/settings', settingsBody({ token: t })));
-  $('token').value = '';
+  show($('loginmsg'), await post('/api/settings', settingsBody(Object.assign({ token: t }, r ? { sc_refresh: r } : {}))));
+  $('token').value = ''; $('screfresh').value = '';
   await refresh();
   if (settings.token) library();
 }
 
 async function relogin() {
-  const t = $('token2').value.trim();
+  const t = $('token2').value.trim(), r = $('screfresh2').value.trim();
   if (!t) { show($('loginmsg'), 'error: вставьте токен'); return; }
-  show($('loginmsg'), await post('/api/settings', JSON.stringify({ token: t })));
-  $('token2').value = '';
+  show($('loginmsg'), await post('/api/settings', JSON.stringify(Object.assign({ token: t }, r ? { sc_refresh: r } : {}))));
+  $('token2').value = ''; $('screfresh2').value = '';
   settingsLoaded = false; refresh();
+}
+async function saveRefresh() {
+  const r = $('screfresh3').value.trim();
+  if (!r) { show($('loginmsg'), 'error: вставьте oauth_refresh_token'); return; }
+  show($('loginmsg'), await post('/api/settings', JSON.stringify({ sc_refresh: r })));
+  $('screfresh3').value = '';
+  settingsLoaded = false; refresh();
+}
+// The day-long login: renewed by the speaker when it has the refresh token; otherwise said
+// when it runs out, so it is not a surprise.
+function renderRenew(s) {
+  const st = s.settings || {}, exp = st.token_exp, err = st.sc_renew_error;
+  const until = exp ? new Date(exp * 1000).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : '';
+  $('reloginwhy').textContent = exp && exp * 1000 < Date.now()
+    ? (st.sc_refresh ? 'Колонка не смогла продлить вход' + (err ? ': ' + err : '') + '.' : 'Токен SoundCloud живёт сутки и истёк ' + until + ', а oauth_refresh_token для продления не сохранён.')
+    : 'SoundCloud больше не принимает сохранённый токен (вы вышли на сайте или он истёк).';
+  const show_ = s.login !== 'refused' && !!st.token && !!exp;
+  $('renewbox').hidden = !show_;
+  if (!show_) return;
+  $('renewbox').classList.toggle('warn', !st.sc_refresh || !!err);
+  $('renewform').hidden = !!st.sc_refresh && !err;
+  $('renewtext').textContent = st.sc_refresh && !err ? 'Вход продлевается сам: SoundCloud выдаёт его на сутки, колонка берёт новый заранее.'
+    : st.sc_refresh ? 'Не получилось продлить вход: ' + err + '. Вставьте свежий oauth_refresh_token (лучше из приватного окна).'
+    : 'Вход действует до ' + until + ': SoundCloud теперь выдаёт его на сутки. Добавьте oauth_refresh_token (там же, в куках soundcloud.com) — и колонка будет продлевать его сама.';
 }
 
 async function logout() {
@@ -5110,7 +5661,14 @@ async function recs() {
   refresh();
 }
 
+let libraryAsked = null;
 async function library() {
+  // One request at a time (the home page asks ahead; the tab may ask meanwhile).
+  if (libraryAsked) return libraryAsked;
+  libraryAsked = libraryNow().finally(() => { libraryAsked = null; });
+  return libraryAsked;
+}
+async function libraryNow() {
   busy($('minemsg'), 'Загружаю плейлисты…');
   const r = await postJSON('library');
   if (r.error) { show($('minemsg'), r.error, true); return; }
@@ -5169,8 +5727,15 @@ function renderUpdate(u) {
   if (updWaitFor && !u.installing && l && l.status === 'failed' && !l.to) updWaitFor = null;
 }
 
+// No browser dialog: the first press asks on the button itself, the second removes.
+let uninstallArmed = 0;
 async function uninstallSoundya() {
-  if (!confirm('Удалить soundya с колонки вместе с настройками? SoundCloud и AirPlay перестанут работать.')) return;
+  if (Date.now() - uninstallArmed > 5000) {
+    uninstallArmed = Date.now();
+    show($('uninstmsg'), 'error: нажмите ещё раз, чтобы удалить soundya с колонки вместе с настройками');
+    return;
+  }
+  uninstallArmed = 0;
   busy($('uninstmsg'), 'Удаляю…');
   show($('uninstmsg'), await post('/api/cmd', 'uninstall'));
 }
@@ -5255,6 +5820,78 @@ function contactRow(c) {
   row.append(who, to, del);
   return row;
 }
+// ---- several TVs and computers ----
+function devRow(kind, d) {
+  const row = document.createElement('div');
+  row.className = 'contact devrow'; row.dataset.kind = kind;
+  const field = (cls, ph, val, type) => {
+    const i = document.createElement('input');
+    i.className = cls; i.type = type || 'text'; i.placeholder = ph; i.value = val || '';
+    i.autocomplete = 'off'; i.spellcheck = false; return i;
+  };
+  const parts = [field('dname', 'имя: спальня', d.name), field('dhost', '192.168.0.51', d.host)];
+  if (kind === 'pc') parts.push(field('dtoken', 'ключ', d.token, 'password'), field('dmac', 'MAC (необязательно)', d.mac));
+  const test = document.createElement('button');
+  test.textContent = 'Проверить'; test.className = 'dtest';
+  test.onclick = async () => {
+    const name = row.querySelector('.dname').value.trim(), msg = $(kind === 'pc' ? 'pcmsg' : 'tvmsg');
+    if (!name) { show(msg, 'error: сначала дайте устройству имя'); return; }
+    busy(msg, 'Сохраняю и проверяю «' + name + '»…');
+    const saved = await post('/api/settings', settingsBody({}));
+    if (saved.startsWith('error')) { show(msg, saved); return; }
+    settingsLoaded = false;
+    show(msg, await post('/api/cmd', 'on ' + name + '\t' + (kind === 'pc' ? 'pc ping' : 'tv ping')));
+    refresh();
+  };
+  const del = document.createElement('button');
+  del.textContent = '×'; del.title = 'Удалить'; del.setAttribute('aria-label', 'Удалить устройство');
+  del.onclick = () => row.remove();
+  row.append(...parts, test, del);
+  return row;
+}
+function renderDevs(kind, list) {
+  const box = $(kind === 'pc' ? 'pcsmore' : 'tvsmore');
+  // Not while it is being filled in (the status comes back every few seconds).
+  if (box.contains(document.activeElement)) return;
+  box.innerHTML = '';
+  list.forEach(d => box.append(devRow(kind, d)));
+}
+function addDev(kind) {
+  const row = devRow(kind, {});
+  $(kind === 'pc' ? 'pcsmore' : 'tvsmore').append(row);
+  row.querySelector('input').focus();
+}
+function readDevs(kind) {
+  return [...document.querySelectorAll(`#${kind === 'pc' ? 'pcsmore' : 'tvsmore'} .devrow`)].map(r => {
+    const v = c => (r.querySelector(c) || {}).value || '';
+    return kind === 'pc' ? { name: v('.dname'), host: v('.dhost'), token: v('.dtoken'), mac: v('.dmac') } : { name: v('.dname'), host: v('.dhost') };
+  }).filter(d => d.host.trim() || (d.mac || '').trim());
+}
+// The remote's TV picker: shown when there is more than one.
+function renderTvPick(st) {
+  const tvs = [];
+  if ((st.tv_host || '').trim()) tvs.push({ name: st.tv_name || '', label: st.tv_name || 'Телевизор' });
+  for (const t of st.tvs_more || []) if ((t.host || '').trim()) tvs.push({ name: t.name, label: t.name });
+  const sig = JSON.stringify([tvs, st.tv_active, tvPicked && Date.now() - tvPicked.at < 6000]);
+  document.querySelectorAll('.tvpick').forEach(sel => {
+    sel.hidden = tvs.length < 2;
+    if (sel.dataset.sig === sig || document.activeElement === sel) return;
+    sel.dataset.sig = sig;
+    sel.replaceChildren(...tvs.map(t => { const o = document.createElement('option'); o.value = t.name; o.textContent = t.label; return o; }));
+    // The status may still be the one from before the pick for a moment.
+    const fresh = tvPicked && Date.now() - tvPicked.at < 6000;
+    sel.value = fresh ? tvPicked.name : st.tv_active || (tvs[0] ? tvs[0].name : '');
+  });
+}
+let tvPicked = null;
+async function pickTv(name) {
+  settings.tv_active = name;
+  tvPicked = { name, at: Date.now() };
+  const r = await post('/api/settings', JSON.stringify({ tv_active: name }));
+  if (r.startsWith('error')) alert(r.replace(/^error:\s*/, ''));
+  refresh();
+}
+
 function renderContacts(list) {
   const box = $('contacts');
   box.innerHTML = '';
@@ -5432,6 +6069,147 @@ setInterval(() => { if (!document.hidden) refresh(); }, 1000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 // A new release shows up as soon as the page is opened, not hours later.
 post('/api/cmd', 'update auto').then(refresh);
+</script>
+<script>
+// The alarm that cannot be slept through (src/alarm.rs), on the home tab.
+(() => {
+  const home = document.getElementById('tab-home');
+  if (!home) return;
+  const DAYS = { once: 'один раз', daily: 'каждый день', weekdays: 'по будням', weekend: 'по выходным' };
+  const STAGE = { Music: 'играет музыка', Alice: 'говорит Алиса', Check: 'спрашивает «Вы проснулись?»', Question: 'ждёт ответ на пример', Snoozed: 'отложен на 5 минут' };
+  const srcWord = s => !s ? 'ваша музыка' : s === 'likes' ? 'лайки' : s === 'recs' ? 'рекомендации'
+    : s.startsWith('playlist:') ? 'плейлист «' + s.slice(9) + '»' : s.startsWith('play:') ? '«' + s.slice(5) + '»'
+    : s.startsWith('link:') ? '«' + (s.split('soundcloud.com/')[1] || 'ссылка').split('/').filter(Boolean).join(' — ').replace(/-/g, ' ') + '»' : s;
+  const send = (cmd) => fetch('/api/cmd', { method: 'POST', body: cmd }).then(r => r.text()).catch(e => 'error: ' + e);
+
+  const box = document.createElement('div');
+  box.className = 'widget';
+  box.dataset.w = 'alarm';
+  // The panel's own look: its fields, buttons and hints, nothing of its own.
+  const FIELD = 'font:inherit;color:var(--ink);background:var(--field);border:1px solid var(--glass-edge);border-radius:14px;padding:9px 11px;outline:none';
+  box.innerHTML = `
+    <div class="whead"><b>Будильник</b></div>
+    <div id="alring" hidden>
+      <p><b>Звонит</b> <span class="hint" id="alstage"></span></p>
+      <div class="row" style="gap:8px;flex-wrap:wrap"><button class="primary" id="alawake">Я проснулся</button><button id="alsnooze">Ещё 5 минут</button></div>
+      <div id="alq" hidden style="margin-top:10px"><p id="alqtext"></p>
+        <div class="row" style="gap:8px"><input type="text" id="alans" inputmode="numeric" autocomplete="off" placeholder="Ответ" style="${FIELD};width:110px"><button class="primary" id="alanswer">Ответить</button></div></div>
+    </div>
+    <ul class="list" id="allist"></ul>
+    <p class="hint" id="alempty">Будильников нет. Голосом: «Алиса, разбуди меня в 7 под мои лайки».</p>
+    <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:8px">
+      <input type="time" id="altime" value="07:00">
+      <select id="aldays" style="${FIELD}">${Object.entries(DAYS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>
+      <input type="text" id="alsrc" placeholder="Под что: лайки, рекомендации, плейлист утро или ссылка SoundCloud" style="flex:1;min-width:180px">
+      <button class="primary" id="aladd">Поставить</button>
+    </div>
+    <details class="donelist" id="almorning"><summary>Утро после будильника</summary>
+      <label class="check"><input type="checkbox" id="mon"><span>После верного ответа — приветствие, погода, планы и новости</span></label>
+      <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:6px">
+        <input type="text" id="mgreet" placeholder="Доброе утро!" style="flex:1 1 220px">
+        <select id="mnews" style="${FIELD};flex:1 1 160px">
+          <option value="">Без новостей</option><option value="ria">РИА Новости</option><option value="rbc">РБК</option>
+          <option value="lenta">Лента.ру</option><option value="habr">Хабр</option><option value="tg">Каналы Telegram…</option><option value="url">Своя RSS-ссылка…</option>
+        </select>
+      </div>
+      <input type="text" id="mnewsurl" placeholder="https://… ссылка на RSS" hidden style="margin-top:8px">
+      <input type="text" id="mnewstg" placeholder="@meduzalive, @rbc_news, @breakingmash — открытые каналы через запятую" hidden style="margin-top:8px">
+      <input type="text" id="mintro" placeholder="Заставка: трек SoundCloud — ссылка или название (необязательно)" style="margin-top:8px">
+      <div class="row" style="flex-wrap:wrap;gap:12px;margin-top:6px">
+        <label class="check"><input type="checkbox" id="mweather"><span>Погода</span></label>
+        <label class="check"><input type="checkbox" id="mplans"><span>Планы на день</span></label>
+      </div>
+      <p class="hint">Каналы Telegram — только открытые, у которых есть веб-страница t.me/s/имя (у некоторых, например РИА, она выключена). Telegram в России закрыт, поэтому посты колонка берёт через сервер soundya (он видит только имена каналов). Заставка играет 20 секунд, потом Алиса здоровается. Говорит голосом Алисы; погода — для города из «Вид → Экран», планы — из планировщика.</p>
+      <div class="row" style="gap:8px"><button class="primary" id="msave">Сохранить</button><button id="mtest">Проверить сейчас</button></div>
+    </details>
+    <div class="msg" id="almsg"></div>`;
+  home.insertBefore(box, home.firstElementChild ? home.firstElementChild.nextSibling : null);
+  const $ = id => box.querySelector('#' + id);
+  const show = t => { const m = $('almsg'); m.textContent = t.replace(/^OK:\s*/, ''); m.className = 'msg ' + (t.startsWith('error') ? 'err' : 'ok'); };
+
+  let lastQuestion = '';
+  async function load() {
+    let j; try { j = JSON.parse(await send('alarm json')); } catch (e) { return; }
+    const r = j.ringing;
+    $('alring').hidden = !r;
+    if (r) {
+      $('alstage').textContent = '· ' + (STAGE[r.stage] || r.stage) + ' · круг ' + r.round + (r.snoozes ? ' · отложен ' + r.snoozes + ' раз' : '');
+      $('alq').hidden = r.stage !== 'Question';
+      if (r.stage === 'Question' && r.question && !lastQuestion) $('alqtext').textContent = `Сколько будет ${r.question[0]} плюс ${r.question[1]}?`;
+    } else lastQuestion = '';
+    const list = $('allist'); list.innerHTML = '';
+    const on = (j.alarms || []).filter(a => a.on);
+    $('alempty').hidden = on.length > 0;
+    for (const a of on) {
+      const li = document.createElement('li');
+      const t = document.createElement('span'); t.textContent = `${a.hour}:${String(a.minute).padStart(2, '0')} · ${DAYS[a.days] || a.days} · ${srcWord(a.source)}`;
+      const del = document.createElement('button'); del.className = 'link'; del.textContent = '✕'; del.title = 'Удалить';
+      del.onclick = async () => { show(await send('alarm del ' + a.id)); load(); };
+      li.append(t, del); list.appendChild(li);
+    }
+  }
+  $('aladd').onclick = async () => {
+    const [h, m] = ($('altime').value || '07:00').split(':').map(Number);
+    show(await send('alarm add ' + JSON.stringify({ hour: h, minute: m, days: $('aldays').value, source: $('alsrc').value.trim() })));
+    load();
+  };
+  $('alawake').onclick = async () => {
+    const t = await send('alarm awake');
+    lastQuestion = t.replace(/^OK:\s*/, ''); $('alqtext').textContent = lastQuestion; $('alq').hidden = false; $('alans').focus(); load();
+  };
+  $('alans').onkeydown = e => { if (e.key === 'Enter') $('alanswer').click(); };
+  $('alanswer').onclick = async () => {
+    const t = await send('alarm answer ' + ($('alans').value || '').trim());
+    $('alans').value = ''; show(t);
+    lastQuestion = /Неверно/.test(t) ? t.replace(/^OK:\s*/, '') : '';
+    if (lastQuestion) $('alqtext').textContent = lastQuestion;
+    load();
+  };
+  $('alsnooze').onclick = async () => { show(await send('alarm snooze')); load(); };
+  // «Утро после будильника»: kept in the settings like any other.
+  const KNOWN = ['', 'ria', 'rbc', 'lenta', 'habr'];
+  function fillMorning() {
+    const st = (typeof settings === 'object' && settings) || {};
+    if (box.querySelector('#almorning').contains(document.activeElement)) return;
+    $('mon').checked = st.morning_on !== false;
+    $('mgreet').value = st.morning_greet || '';
+    const news = st.morning_news === undefined ? 'ria' : st.morning_news;
+    const tg = news.startsWith('tg:');
+    $('mnews').value = KNOWN.includes(news) ? news : tg ? 'tg' : 'url';
+    $('mnewsurl').value = KNOWN.includes(news) || tg ? '' : news;
+    $('mnewstg').value = tg ? news.slice(3).split(',').map(c => '@' + c.trim().replace(/^@/, '')).filter(c => c.length > 1).join(', ') : '';
+    $('mnewsurl').hidden = $('mnews').value !== 'url';
+    $('mnewstg').hidden = $('mnews').value !== 'tg';
+    $('mintro').value = st.morning_intro || '';
+    $('mweather').checked = st.morning_weather !== false;
+    $('mplans').checked = st.morning_plans !== false;
+  }
+  $('mnews').onchange = () => {
+    $('mnewsurl').hidden = $('mnews').value !== 'url';
+    $('mnewstg').hidden = $('mnews').value !== 'tg';
+    if (!$('mnewsurl').hidden) $('mnewsurl').focus();
+    if (!$('mnewstg').hidden) $('mnewstg').focus();
+  };
+  const morningBody = () => JSON.stringify({
+    morning_on: $('mon').checked, morning_greet: $('mgreet').value.trim(),
+    morning_news: $('mnews').value === 'url' ? $('mnewsurl').value.trim() : $('mnews').value === 'tg' ? 'tg:' + $('mnewstg').value.trim() : $('mnews').value,
+    morning_intro: $('mintro').value.trim(), morning_weather: $('mweather').checked, morning_plans: $('mplans').checked,
+  });
+  $('msave').onclick = async () => { show(await fetch('/api/settings', { method: 'POST', body: morningBody() }).then(r => r.text()).catch(e => 'error: ' + e)); };
+  $('mtest').onclick = async () => {
+    const saved = await fetch('/api/settings', { method: 'POST', body: morningBody() }).then(r => r.text()).catch(e => 'error: ' + e);
+    if (saved.startsWith('error')) { show(saved); return; }
+    show(await send('morning test'));
+  };
+  // «Стандартный» in «Колонка»: the widget is not shown (settings.alarm_own).
+  setInterval(() => box.classList.toggle('alarmoff', typeof settings === 'object' && settings && settings.alarm_own === false), 2000);
+  // Developer build only for now.
+  box.querySelector('#almorning').hidden = !window.SOUNDYA_DEV;
+  box.querySelector('#almorning').addEventListener('toggle', fillMorning);
+  setTimeout(fillMorning, 1500);
+  load();
+  setInterval(load, 5000);
+})();
 </script>
 </body>
 </html>

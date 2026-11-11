@@ -21,6 +21,44 @@ const API: &str = "https://api-v2.soundcloud.com";
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
 const SEC_CH_UA: &str = "\"Not)A;Brand\";v=\"8\", \"Chromium\";v=\"138\", \"Google Chrome\";v=\"138\"";
 /// Re-reading soundcloud.com for a client_id at most this often.
+/// Where soundcloud.com renews its day-long login.
+const TOKEN_URL: &str = "https://secure.soundcloud.com/oauth/token";
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
+
+/// One claim of a JWT token (its middle part, base64url JSON); None for the old, opaque tokens.
+pub fn jwt_claim(token: &str, key: &str) -> Option<Value> {
+    let mut parts = token.trim().trim_start_matches("OAuth ").split('.');
+    let (_, body, _) = (parts.next()?, parts.next()?, parts.next()?);
+    let bytes = base64url(body)?;
+    serde_json::from_slice::<Value>(&bytes).ok()?.get(key).cloned()
+}
+
+fn base64url(s: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let (mut acc, mut bits) = (0u32, 0u32);
+    for c in s.trim_end_matches('=').bytes() {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'-' | b'+' => 62,
+            b'_' | b'/' => 63,
+            _ => return None,
+        };
+        acc = (acc << 6) | u32::from(v);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
+}
+
 const SCRAPE_EVERY: Duration = Duration::from_secs(10 * 60);
 
 /// Adds the headers Chrome sends to SoundCloud's site, API and CDN.
@@ -277,6 +315,17 @@ pub struct Client {
     token: Arc<Mutex<Option<String>>>,
     /// SoundCloud refused the token: requests go without it until a new one is entered.
     token_bad: Arc<std::sync::atomic::AtomicBool>,
+    /// The site's `oauth_refresh_token` cookie: since 2026 `oauth_token` is a JWT that lives a
+    /// day, and this (single use) gets the next one. "" — none given.
+    refresh: Arc<Mutex<Option<String>>>,
+    /// A renewed (token, refresh token) pair the controller has yet to save: the old refresh
+    /// token no longer works, so it must reach the settings file at once.
+    renewed: Arc<Mutex<Option<(String, String)>>>,
+    /// Renewal in progress / last attempt / why the last one failed.
+    renewing: Arc<Mutex<Option<std::time::Instant>>>,
+    renew_error: Arc<Mutex<Option<String>>>,
+    /// Where tokens are renewed: secure.soundcloud.com; another server only in tests.
+    token_url: String,
     cache: Option<std::path::PathBuf>,
     /// Formats that answered 404 this session; tried last from then on.
     dead: Arc<Mutex<std::collections::HashSet<String>>>,
@@ -324,11 +373,29 @@ fn playlist_info(v: &Value) -> Option<PlaylistInfo> {
             .get("artwork_url")
             .and_then(Value::as_str)
             .filter(|u| !u.is_empty())
-            .or_else(|| v.pointer("/tracks/0/artwork_url").and_then(Value::as_str))
+            .or_else(|| v.get("calculated_artwork_url").and_then(Value::as_str).filter(|u| !u.is_empty()))
+            // As soundcloud.com shows it: the first track that has a cover (the first may have none).
+            .or_else(|| {
+                v.get("tracks")?.as_array()?.iter().find_map(|t| t.get("artwork_url").and_then(Value::as_str).filter(|u| !u.is_empty()))
+            })
             .or_else(|| v.pointer("/user/avatar_url").and_then(Value::as_str))
             .unwrap_or("")
             .replace("-large.", "-t300x300."),
     })
+}
+
+/// No cover of its own: none, or its author's picture standing in.
+fn bare_cover(art: &str) -> bool {
+    art.is_empty() || art.contains("/avatars-")
+}
+
+/// The first track cover in a list of tracks, t300x300.
+fn first_cover(tracks: &Value) -> Option<String> {
+    tracks
+        .as_array()?
+        .iter()
+        .find_map(|t| t.get("artwork_url").and_then(Value::as_str).filter(|u| !u.is_empty()))
+        .map(|u| u.replace("-large.", "-t300x300."))
 }
 
 fn status_of(e: &ureq::Error) -> Option<u16> {
@@ -363,6 +430,11 @@ impl Client {
             site: "https://soundcloud.com/".to_owned(),
             token: Arc::new(Mutex::new(None)),
             token_bad: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            refresh: Arc::new(Mutex::new(None)),
+            renewed: Arc::new(Mutex::new(None)),
+            renewing: Arc::new(Mutex::new(None)),
+            renew_error: Arc::new(Mutex::new(None)),
+            token_url: TOKEN_URL.to_owned(),
             cache,
             dead: Arc::new(Mutex::new(std::collections::HashSet::new())),
             recs: Arc::new(Mutex::new(None)),
@@ -388,6 +460,123 @@ impl Client {
     /// SoundCloud stopped accepting the saved token (expired, logged out on the site).
     pub fn token_refused(&self) -> bool {
         self.has_token() && self.token_bad.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// The `oauth_refresh_token` cookie; "" forgets it.
+    pub fn set_refresh(&self, refresh: &str) {
+        let r = refresh.trim();
+        *self.refresh.lock().unwrap() = (!r.is_empty()).then(|| r.to_owned());
+        *self.renew_error.lock().unwrap() = None;
+        *self.renewing.lock().unwrap() = None;
+    }
+
+    pub fn has_refresh(&self) -> bool {
+        self.refresh.lock().unwrap().is_some()
+    }
+
+    /// When the saved token stops working (unix seconds): only the new, JWT tokens say it.
+    pub fn token_exp(&self) -> Option<u64> {
+        self.token.lock().unwrap().as_deref().and_then(|t| jwt_claim(t, "exp")).and_then(|v| v.as_u64())
+    }
+
+    /// The saved token has run out (a JWT past its time).
+    pub fn token_expired(&self) -> bool {
+        self.token_exp().is_some_and(|exp| exp <= unix_now())
+    }
+
+    /// Why the last renewal failed, for the page («SoundCloud не принял…»).
+    pub fn renew_error(&self) -> Option<String> {
+        self.renew_error.lock().unwrap().clone()
+    }
+
+    /// A renewed (token, refresh token) to save, once.
+    pub fn take_renewed(&self) -> Option<(String, String)> {
+        self.renewed.lock().unwrap().take()
+    }
+
+    /// From the controller's loop: renews the token in the background 10 minutes before it
+    /// runs out (or at once if it already has), a minute between tries after a network error.
+    pub fn keep_token(&self) {
+        if !self.renew_due() {
+            return;
+        }
+        let me = self.clone();
+        thread::spawn(move || {
+            let _ = me.renew();
+        });
+    }
+
+    fn renew_due(&self) -> bool {
+        let Some(exp) = self.token_exp() else { return false };
+        if !self.has_refresh() || exp > unix_now() + 600 {
+            return false;
+        }
+        // A refused refresh token is not tried again until a new one is given.
+        if self.renew_error.lock().unwrap().as_deref().is_some_and(|e| e.starts_with("refused")) {
+            return false;
+        }
+        let mut last = self.renewing.lock().unwrap();
+        if last.is_some_and(|t| t.elapsed() < Duration::from_secs(60)) {
+            return false;
+        }
+        *last = Some(std::time::Instant::now());
+        true
+    }
+
+    /// Exchanges the refresh token for a new pair, as soundcloud.com does every day.
+    pub fn renew(&self) -> Result<(), String> {
+        let Some(refresh) = self.refresh.lock().unwrap().clone() else {
+            return Err("нет oauth_refresh_token".into());
+        };
+        // The site renews with the client the token was issued to.
+        let client_id = self
+            .token
+            .lock()
+            .unwrap()
+            .as_deref()
+            .and_then(|t| jwt_claim(t, "client_id"))
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .or_else(|| self.client_id.lock().unwrap().clone())
+            .unwrap_or_default();
+        let r = self.agent().post(&self.token_url).set("Accept", "application/json").send_form(&[
+            ("client_id", client_id.as_str()),
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh.as_str()),
+        ]);
+        let v: Value = match r {
+            Ok(resp) => resp.into_json().map_err(|e| e.to_string())?,
+            Err(e) if matches!(status_of(&e), Some(400 | 401 | 403)) => {
+                let code = status_of(&e).unwrap_or(0);
+                eprintln!("soundcloud: the refresh token was refused ({code})");
+                *self.renew_error.lock().unwrap() = Some(format!("refused: SoundCloud не принял oauth_refresh_token ({code})"));
+                return Err(format!("SoundCloud не принял oauth_refresh_token ({code})"));
+            }
+            Err(ureq::Error::Status(code, _)) => {
+                let e = format!("HTTP {code} на secure.soundcloud.com");
+                eprintln!("soundcloud: renewing the token: {e}");
+                *self.renew_error.lock().unwrap() = Some(e.clone());
+                return Err(e);
+            }
+            Err(ureq::Error::Transport(t)) => {
+                let e = format!("secure.soundcloud.com: {}", t.message().unwrap_or(&t.kind().to_string()));
+                eprintln!("soundcloud: renewing the token: {e}");
+                *self.renew_error.lock().unwrap() = Some(e.clone());
+                return Err(e);
+            }
+        };
+        let Some(token) = v.get("access_token").and_then(Value::as_str).filter(|t| !t.is_empty()) else {
+            *self.renew_error.lock().unwrap() = Some("SoundCloud ответил без токена".into());
+            return Err("SoundCloud ответил без токена".into());
+        };
+        // Single use: the old refresh token is spent, the new one goes to the settings at once.
+        let next = v.get("refresh_token").and_then(Value::as_str).filter(|t| !t.is_empty()).unwrap_or(&refresh).to_owned();
+        *self.token.lock().unwrap() = Some(token.to_owned());
+        *self.refresh.lock().unwrap() = Some(next.clone());
+        *self.renewed.lock().unwrap() = Some((token.to_owned(), next));
+        *self.renew_error.lock().unwrap() = None;
+        self.token_bad.store(false, std::sync::atomic::Ordering::Release);
+        eprintln!("soundcloud: the token is renewed");
+        Ok(())
     }
 
     /// Switches all later requests (API and audio) to a new proxy; "" means direct.
@@ -509,8 +698,13 @@ impl Client {
         let mut refreshed = false;
         let mut retried = false;
         let bad = std::sync::atomic::Ordering::Acquire;
+        // A token that has run out: a new one first (from the refresh token), if there is one.
+        if self.has_token() && self.token_expired() && self.has_refresh() && self.renew_due() {
+            let _ = self.renew();
+        }
         // Without the token: it was refused (search and public pages work anonymously).
-        let mut anonymous = self.token_bad.load(bad);
+        // «/me» is only ever about the login, so it always goes with it.
+        let mut anonymous = self.token_bad.load(bad) && !url.ends_with("/me");
         loop {
             let id = self.client_id(refreshed)?;
             let mut req = self
@@ -612,6 +806,13 @@ impl Client {
     /// Some(false) refused (401/403), None — no answer (network). Clears the
     /// «refused» mark when it is good again.
     pub fn verify_token(&self) -> Option<bool> {
+        if self.token_expired() {
+            if self.has_refresh() && self.renew().is_ok() {
+                return Some(true);
+            }
+            self.token_bad.store(true, std::sync::atomic::Ordering::Release);
+            return Some(false);
+        }
         let token = self.token.lock().unwrap().clone()?;
         let id = self.client_id(false).ok()?;
         let r = self
@@ -694,6 +895,16 @@ impl Client {
         let mut seen = std::collections::HashSet::new();
         out.retain(|p| seen.insert(p.id.clone()));
         Ok(out)
+    }
+
+    /// The library for the page: with the covers soundcloud.com shows (a few more requests,
+    /// so not for voice commands, which only need the names).
+    pub fn library_with_covers(&self) -> Res<Vec<PlaylistInfo>> {
+        // The home page's way: the covers it already knows at once, the rest six at a time
+        // (one by one, «Моя музыка» drew its covers long after the home page).
+        let mut shelf = [Shelf { title: String::new(), items: self.library()? }];
+        self.fill_covers(&mut shelf);
+        Ok(std::mem::take(&mut shelf[0].items))
     }
 
     pub fn likes(&self) -> Res<Vec<Track>> {
@@ -1028,12 +1239,40 @@ impl Client {
     fn hydrate(&self, tracks: Vec<Track>) -> Res<Vec<Track>> {
         let missing: Vec<u64> = tracks.iter().filter(|t| !t.hydrated()).map(|t| t.id).collect();
         let mut full = std::collections::HashMap::new();
-        for chunk in missing.chunks(50) {
-            let ids = chunk.iter().map(u64::to_string).collect::<Vec<_>>().join(",");
-            let v = self.api("/tracks", &[("ids", ids.as_str())])?;
-            let got: Vec<Track> = serde_json::from_value(v)?;
-            for t in got {
-                full.insert(t.id, t);
+        // All the chunks at once, a few at a time: one by one, «качал очка» (336 tracks,
+        // 7 chunks) took 35 s to start. A chunk that fails is left out, not the playlist.
+        let chunks: Vec<&[u64]> = missing.chunks(50).collect();
+        let mut last_err = None;
+        let mut fetched = 0;
+        for group in chunks.chunks(4) {
+            let results: Vec<Res<Vec<Track>>> = std::thread::scope(|sc| {
+                let jobs: Vec<_> = group
+                    .iter()
+                    .map(|chunk| {
+                        let ids = chunk.iter().map(u64::to_string).collect::<Vec<_>>().join(",");
+                        sc.spawn(move || -> Res<Vec<Track>> {
+                            let v = self.api("/tracks", &[("ids", ids.as_str())])?;
+                            Ok(serde_json::from_value(v)?)
+                        })
+                    })
+                    .collect();
+                jobs.into_iter().map(|j| j.join().unwrap_or_else(|_| Err("a track chunk failed".into()))).collect()
+            });
+            for r in results {
+                match r {
+                    Ok(got) => {
+                        fetched += 1;
+                        for t in got {
+                            full.insert(t.id, t);
+                        }
+                    }
+                    Err(e) => last_err = Some(e),
+                }
+            }
+        }
+        if fetched == 0 {
+            if let Some(e) = last_err {
+                return Err(e);
             }
         }
         Ok(tracks
@@ -1085,13 +1324,78 @@ impl Client {
     /// «More of what you like», daily / weekly mixes…), each with its playlists.
     pub fn home(&self) -> Res<Vec<Shelf>> {
         let v = self.api("/mixed-selections", &[("limit", "20")])?;
-        Ok(shelves(&v))
+        let mut out = shelves(&v);
+        self.fill_covers(&mut out);
+        Ok(out)
+    }
+
+    /// SoundCloud sends some shelf items («Related tracks: …», the genre charts, your own
+    /// playlists) with neither a cover nor their tracks, so they showed their author's picture:
+    /// SoundCloud's logo, or your avatar. soundcloud.com shows the first track's cover there,
+    /// so it is looked up (several at once) and remembered for the next visit.
+    fn fill_covers(&self, shelves: &mut [Shelf]) {
+        static KNOWN: std::sync::OnceLock<Mutex<std::collections::HashMap<String, String>>> = std::sync::OnceLock::new();
+        let known = KNOWN.get_or_init(Default::default);
+        let mut wanted = Vec::new();
+        for p in shelves.iter_mut().flat_map(|s| s.items.iter_mut()).filter(|p| bare_cover(&p.art)) {
+            match known.lock().unwrap().get(&p.id) {
+                Some(art) => p.art = art.clone(),
+                None if !wanted.contains(&p.id) => wanted.push(p.id.clone()),
+                None => {}
+            }
+        }
+        wanted.truncate(30);
+        if wanted.is_empty() {
+            return;
+        }
+        let found: Vec<(String, String)> = std::thread::scope(|scope| {
+            let jobs: Vec<_> = wanted
+                .chunks(wanted.len().div_ceil(6))
+                .map(|ids| scope.spawn(move || ids.iter().filter_map(|id| Some((id.clone(), self.cover_of_playlist(id)?))).collect::<Vec<_>>()))
+                .collect();
+            jobs.into_iter().flat_map(|j| j.join().unwrap_or_default()).collect()
+        });
+        let mut known = known.lock().unwrap();
+        for (id, art) in found {
+            known.insert(id, art);
+        }
+        for p in shelves.iter_mut().flat_map(|s| s.items.iter_mut()).filter(|p| bare_cover(&p.art)) {
+            if let Some(art) = known.get(&p.id) {
+                p.art = art.clone();
+            }
+        }
+    }
+
+    /// A playlist's cover as soundcloud.com shows it: its own, else its first track's.
+    fn cover_of_playlist(&self, id: &str) -> Option<String> {
+        let path = if id.bytes().all(|b| b.is_ascii_digit()) { format!("/playlists/{id}") } else { format!("/system-playlists/{id}") };
+        let v = self.api(&path, &[]).ok()?;
+        if let Some(p) = playlist_info(&v).filter(|p| !bare_cover(&p.art)) {
+            return Some(p.art);
+        }
+        // The tracks come as bare ids: the first few are fetched for their covers.
+        let ids: Vec<String> = v.get("tracks")?.as_array()?.iter().filter_map(|t| t.get("id")?.as_u64()).take(5).map(|n| n.to_string()).collect();
+        if ids.is_empty() {
+            return None;
+        }
+        let tracks = self.api("/tracks", &[("ids", ids.join(",").as_str())]).ok()?;
+        first_cover(&tracks)
     }
 
     pub fn related(&self, id: u64) -> Res<Vec<Track>> {
         let v = self.api(&format!("/tracks/{id}/related"), &[("limit", "20")])?;
         let c: Collection<Track> = serde_json::from_value(v)?;
         Ok(c.collection.into_iter().filter(|t| t.transcoding().is_some()).collect())
+    }
+
+    /// A track's cover and id by its soundcloud.com link (for history entries saved without them).
+    pub fn cover_of(&self, link: &str) -> Res<(String, u64)> {
+        let v = self.api("/resolve", &[("url", link)])?;
+        if v.get("kind").and_then(Value::as_str) != Some("track") {
+            return Err("not a track".into());
+        }
+        let t = serde_json::from_value::<Track>(v)?;
+        Ok((t.cover().unwrap_or_default(), t.id))
     }
 
     /// A soundcloud.com link to a track, playlist or user.
@@ -1661,6 +1965,90 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    fn b64url(data: &[u8]) -> String {
+        const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        let mut out = String::new();
+        for chunk in data.chunks(3) {
+            let n = chunk.iter().enumerate().fold(0u32, |n, (i, b)| n | (u32::from(*b) << (16 - 8 * i)));
+            for i in 0..=chunk.len() {
+                out.push(A[((n >> (18 - 6 * i)) & 63) as usize] as char);
+            }
+        }
+        out
+    }
+
+    fn jwt(exp: u64, client_id: &str) -> String {
+        let body = serde_json::json!({ "exp": exp, "client_id": client_id, "iss": "https://secure.soundcloud.com" });
+        format!("{}.{}.sig", b64url(br#"{"alg":"RS256","typ":"JWT"}"#), b64url(body.to_string().as_bytes()))
+    }
+
+    #[test]
+    fn the_day_long_login_renews_itself() {
+        // Since 2026 soundcloud.com's oauth_token is a JWT that lives 24 hours; the site renews it
+        // with oauth_refresh_token. soundya kept the old one and said «вход устарел» every day.
+        use std::io::{Read as _, Write as _};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", l.local_addr().unwrap());
+        let fresh = jwt(unix_now() + 86400, "WEBCLIENT");
+        let fresh2 = fresh.clone();
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen2 = seen.clone();
+        thread::spawn(move || {
+            for c in l.incoming().flatten() {
+                let mut c = c;
+                // The body may come in a packet of its own: read up to Content-Length.
+                let mut req = Vec::new();
+                let mut buf = [0u8; 4096];
+                loop {
+                    let k = c.read(&mut buf).unwrap_or(0);
+                    req.extend_from_slice(&buf[..k]);
+                    let text = String::from_utf8_lossy(&req).to_string();
+                    let Some((head, body)) = text.split_once("\r\n\r\n") else {
+                        if k == 0 { break } else { continue }
+                    };
+                    let len = head.lines().find_map(|l| l.to_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0))).unwrap_or(0);
+                    if body.len() >= len || k == 0 {
+                        break;
+                    }
+                }
+                let req = String::from_utf8_lossy(&req).to_string();
+                let body = req.split("\r\n\r\n").nth(1).unwrap_or("").to_owned();
+                seen2.lock().unwrap().push(body.clone());
+                let (code, out) = if body.contains("refresh_token=R1") {
+                    ("200 OK", format!("{{\"access_token\":\"{fresh2}\",\"refresh_token\":\"R2\",\"expires_in\":86400}}"))
+                } else {
+                    ("400 Bad Request", "{\"error\":\"invalid_grant\"}".to_owned())
+                };
+                let _ = write!(c, "HTTP/1.1 {code}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{out}", out.len());
+            }
+        });
+        let mut c = Client::new(None, "");
+        c.token_url = format!("{base}/oauth/token");
+        // Old, opaque tokens never run out and are never renewed.
+        c.set_token("2-123456-789-abcdef");
+        assert_eq!((c.token_exp(), c.token_expired(), c.renew_due()), (None, false, false));
+        // A day-old JWT with its refresh token: due, renewed with the token's own client_id.
+        c.set_token(&jwt(unix_now() - 60, "WEBCLIENT"));
+        c.set_refresh("R1");
+        assert!(c.token_expired());
+        assert!(c.renew_due());
+        c.renew().expect("renewed");
+        assert!(seen.lock().unwrap()[0].contains("client_id=WEBCLIENT") && seen.lock().unwrap()[0].contains("grant_type=refresh_token"));
+        assert!(!c.token_expired());
+        assert_eq!(c.take_renewed(), Some((fresh.clone(), "R2".to_owned())));
+        assert_eq!(c.take_renewed(), None);
+        // Not due again until 10 minutes before the new one runs out.
+        assert!(!c.renew_due());
+        // A spent refresh token: said once, not hammered.
+        c.set_token(&jwt(unix_now() - 60, "WEBCLIENT"));
+        c.set_refresh("SPENT");
+        assert!(c.renew().is_err());
+        assert!(c.renew_error().unwrap().contains("400"));
+        assert!(!c.renew_due());
+        assert_eq!(c.verify_token(), Some(false));
+        assert!(c.token_refused());
+    }
+
     #[test]
     fn a_dropped_connection_is_tried_once_more() {
         use std::io::{Read as _, Write as _};
@@ -1699,6 +2087,18 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn shelf_items_without_a_cover_get_their_first_tracks() {
+        assert!(bare_cover(""));
+        assert!(bare_cover("https://i1.sndcdn.com/avatars-69H9-t300x300.jpg"));
+        assert!(!bare_cover("https://i1.sndcdn.com/artworks-a-t300x300.jpg"));
+        let tracks: Value = serde_json::from_str(r#"[{"id":1,"artwork_url":null},{"id":2,"artwork_url":"https://i1.sndcdn.com/artworks-b-large.jpg"}]"#).unwrap();
+        assert_eq!(first_cover(&tracks).as_deref(), Some("https://i1.sndcdn.com/artworks-b-t300x300.jpg"));
+        let chart: Value = serde_json::from_str(r#"{"kind":"system-playlist","urn":"soundcloud:system-playlists:charts-top:all-music","title":"Funk",
+            "calculated_artwork_url":"https://i1.sndcdn.com/artworks-c-large.jpg","user":{"avatar_url":"https://i1.sndcdn.com/avatars-x-large.jpg"}}"#).unwrap();
+        assert_eq!(playlist_info(&chart).unwrap().art, "https://i1.sndcdn.com/artworks-c-t300x300.jpg");
+    }
 
     #[test]
     fn finds_home_page_picks() {

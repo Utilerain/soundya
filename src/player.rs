@@ -23,6 +23,8 @@ use symphonia::core::{
 use crate::{alsa::Output, sc::Kind};
 
 const DUCK_LEVEL: f32 = 0.2;
+/// How far written sound may run ahead of the clock (a card's own buffer is well under this).
+const MAX_AHEAD_MS: u64 = 3000;
 const DUCK_HOLD_MS: u64 = 60_000;
 
 /// Alice activity: music is quieter while she listens or speaks. Also the
@@ -85,6 +87,9 @@ pub struct Flags {
     pub position_ms: AtomicU64,
     /// Requested jump: target position + 1 (0 = none). See `Flags::seek`.
     seek: AtomicU64,
+    /// Another sound card for the rest of the track (Bluetooth on/off): the same download goes
+    /// on, only the card is reopened — no new stream, no jump.
+    move_to: std::sync::Mutex<Option<String>>,
 }
 
 impl Flags {
@@ -93,6 +98,11 @@ impl Flags {
     /// `Outcome::Seek`, so it is opened again from the start.
     pub fn seek(&self, ms: u64) {
         self.seek.store(ms + 1, Ordering::Release);
+    }
+
+    /// Plays on from here on `device` (an ALSA name, as `play` takes).
+    pub fn move_to(&self, device: &str) {
+        *self.move_to.lock().unwrap() = Some(device.to_owned());
     }
 }
 
@@ -184,9 +194,17 @@ fn run(
     let mut buf: Option<SampleBuffer<i16>> = None;
     let mut buf_frames = 0usize;
     let mut pcm: Vec<i16> = Vec::new();
-    let mut gain = Gain(1.0);
+    // From the level it should be at now, not full: with the music in the browser a new
+    // track started loud and faded out over a second (half a second of it from the speaker).
+    let mut gain = Gain(duck.player_level());
     let mut eq = crate::eq::Eq::new();
     let mut frames_played: u64 = 0;
+    // Since the card was opened: (when, track position then). A card takes sound only as fast
+    // as it plays, but BlueALSA with a stalling headset takes it at once: the track then «played»
+    // minutes ahead, and moving back to the speaker jumped there. Sound never runs more than a
+    // few seconds ahead of the clock.
+    let mut clock: Option<(std::time::Instant, u64)> = None;
+    let mut device = device.to_owned();
     let mut decode_errors = 0;
     let mut reopened = 0;
     // Decoded silently up to here: resuming after a broken download, or a jump forward.
@@ -199,6 +217,16 @@ fn run(
                 o.stop_now();
             }
             return Ok(Outcome::Stopped);
+        }
+        if let Some(d) = flags.move_to.lock().unwrap().take() {
+            if d != device {
+                eprintln!("player: moving to {d}");
+                device = d;
+                // What waits in the old card is dropped; the next packet opens the new one.
+                if let Some(mut o) = out.take() {
+                    o.stop_now();
+                }
+            }
         }
         let seek = flags.seek.swap(0, Ordering::AcqRel);
         if seek > 0 {
@@ -271,8 +299,9 @@ fn run(
             continue;
         }
         if out.is_none() {
+            clock = None;
             out = Some(
-                Output::open(device, spec.rate, channels).map_err(|e| format!("alsa: {e}"))?,
+                Output::open(&device, spec.rate, channels).map_err(|e| format!("alsa: {e}"))?,
             );
             eprintln!("player: sound card open, {} Hz, {} ch", spec.rate, channels);
         }
@@ -301,10 +330,17 @@ fn run(
         if crate::vis::ON.load(Ordering::Relaxed) {
             crate::vis::feed(samples, channels, spec.rate, out.as_ref().and_then(|o| o.queued()));
         }
+        let written_from = frames_played * 1000 / rate;
         frames_played += (samples.len() / channels.max(1)) as u64;
-        flags
-            .position_ms
-            .store(frames_played * 1000 / spec.rate.max(1) as u64, Ordering::Release);
+        let written = frames_played * 1000 / rate;
+        let (since, from) = *clock.get_or_insert((std::time::Instant::now(), written_from));
+        let ahead = (written - from).saturating_sub(since.elapsed().as_millis() as u64);
+        if ahead > MAX_AHEAD_MS {
+            thread::sleep(Duration::from_millis(ahead - MAX_AHEAD_MS + 500));
+        }
+        // Where the listener is: what was written less what still waits in the card.
+        let queued = out.as_ref().and_then(|o| o.queued()).map_or(0, |f| f as u64 * 1000 / rate);
+        flags.position_ms.store(written.saturating_sub(queued), Ordering::Release);
     }
     if let Some(o) = out.as_mut() {
         o.finish();
@@ -314,4 +350,22 @@ fn run(
 
 pub fn new_flags() -> Arc<Flags> {
     Arc::new(Flags::default())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_new_track_is_silent_while_the_browser_listens() {
+        let duck = super::Duck::new();
+        duck.set_listening(true);
+        let mut gain = super::Gain(duck.player_level());
+        let mut samples = vec![12_000i16; 4410 * 2];
+        gain.apply(&mut samples, 2, 44_100, duck.player_level());
+        assert!(samples.iter().all(|s| *s == 0), "the first 100 ms reached the speaker");
+        // Back on the speaker: it fades in from silence, not a jump.
+        duck.set_listening(false);
+        let mut samples = vec![12_000i16; 441 * 2];
+        gain.apply(&mut samples, 2, 44_100, duck.player_level());
+        assert!(samples[0].abs() < 100 && samples[samples.len() - 1] < 12_000);
+    }
 }
