@@ -14,6 +14,12 @@ case "${1:-}" in
             echo "soundya already running"
             exit 0
         fi
+        # The owner's SSH (a dropbear kept in /data/opt/bin, outside this package):
+        # an OTA replaces the rootfs and with it any rootfs-side launcher, so the
+        # surviving soundya start script brings it back. Skipped if absent.
+        [ -x /data/opt/bin/dropbear ] && [ -f /data/opt/etc/dropbear/hk_ed25519 ] && {
+            pidof dropbear >/dev/null 2>&1 || /data/opt/bin/dropbear -r /data/opt/etc/dropbear/hk_ed25519 -p 2222 -B
+        }
         nohup setsid "$DIR/run.sh" </dev/null >>"$LOG" 2>&1 &
         echo "soundya started (log: $LOG)"
         ;;
